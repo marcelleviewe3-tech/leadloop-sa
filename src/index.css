@@ -1407,3 +1407,17 @@ td small {
   .whatsapp-benefits { grid-template-columns: 1fr; }
   .integration-title-row { align-items: flex-start; flex-direction: column; }
 }
+
+.calendar-view-switch { display: flex; flex-wrap: wrap; gap: 7px; margin: -5px 0 14px; }
+.calendar-view-switch .active { border-color: #c8f76d; color: #d9efad; background: #243427; }
+.calendar-week-grid { grid-template-columns: repeat(7, minmax(105px, 1fr)); overflow-x: auto; padding-bottom: 5px; }
+.calendar-week-grid .calendar-day { min-height: 170px; }
+.calendar-day-focus { min-height: 210px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 9px; padding: 24px; border: 1px solid #293941; border-radius: 12px; background: #111b23; text-align: center; }
+.calendar-day-focus h2, .calendar-day-focus p { margin: 0; }
+.calendar-day-focus h2 { color: #edf3ee; font-size: clamp(20px, 3vw, 30px); }
+.calendar-day-focus p { color: #9ba9a4; font-size: 13px; }
+@media (max-width: 560px) {
+  .calendar-week-grid { grid-template-columns: repeat(7, minmax(112px, 1fr)); }
+  .calendar-week-grid .calendar-day { min-height: 140px; }
+  .calendar-view-switch { margin-top: 0; }
+}
