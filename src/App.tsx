@@ -1641,6 +1641,10 @@ export default function App() {
                     <option>Manual entry</option><option>Website enquiry</option><option>Phone call</option><option>WhatsApp</option><option>Email</option><option>Referral</option><option>Walk-in</option><option>Other</option>
                   </select>
                 </label>
+                <label className="public-consent">
+                  <input type="checkbox" checked={form.consentToContact === 'true'} onChange={e => setForm({ ...form, consentToContact: e.target.checked ? 'true' : 'false' })} />
+                  <span>This customer has agreed that the business may contact them.</span>
+                </label>
               </>
             )}
             {section === 'Payments' && (
