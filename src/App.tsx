@@ -472,7 +472,6 @@ export default function App() {
     await auth.signOut();
     setUser(null);
     setWorkspace(null);
-    setWorkspaces([]);
   }
 
   const calendarDays = monthDates(calendarCursor);
