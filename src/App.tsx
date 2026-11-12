@@ -41,6 +41,10 @@ type Workspace = {
   trialEndsAt?: string;
 };
 type RecordItem = { id: string; [key: string]: unknown };
+type InstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform?: string }>;
+};
 type Section =
   | 'Overview'
   | 'Leads'
@@ -138,6 +142,7 @@ function weekDates(value: Date) {
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [, setWorkspaces] = useState<Workspace[]>([]);
   const [section, setSection] = useState<Section>('Overview');
@@ -180,6 +185,20 @@ export default function App() {
   const [publicEnquiryUrl, setPublicEnquiryUrl] = useState('');
   const [publicEnquiryBusy, setPublicEnquiryBusy] = useState(false);
   const [whatsappStatus, setWhatsappStatus] = useState<{ connected: boolean; status: string; canStartEmbeddedSignup: boolean; message: string } | null>(null);
+
+  useEffect(() => {
+    const captureInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setInstallPrompt(event as InstallPromptEvent);
+    };
+    const clearInstallPrompt = () => setInstallPrompt(null);
+    window.addEventListener('beforeinstallprompt', captureInstallPrompt);
+    window.addEventListener('appinstalled', clearInstallPrompt);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', captureInstallPrompt);
+      window.removeEventListener('appinstalled', clearInstallPrompt);
+    };
+  }, []);
 
   useEffect(() => {
     if (!publicRouteToken) return;
@@ -313,6 +332,17 @@ export default function App() {
       setNotice(
         error instanceof Error ? error.message : 'Sign-in failed. Please retry.'
       );
+    }
+  }
+
+  async function installApp() {
+    if (!installPrompt) return;
+    try {
+      await installPrompt.prompt();
+      const choice = await installPrompt.userChoice;
+      if (choice.outcome === 'accepted') setInstallPrompt(null);
+    } catch {
+      setNotice('App installation could not be opened. Use Chrome menu > Install app.');
     }
   }
 
@@ -679,6 +709,7 @@ export default function App() {
             <a href="#built-for-sa">Built for SA</a>
           </nav>
           <div className="landing-nav-actions">
+            {installPrompt && <button className="landing-signin" onClick={installApp}>Install app</button>}
             <button className="landing-signin" onClick={signIn}>Sign in</button>
             <button className="primary landing-nav-cta" onClick={signIn}>
               Start free trial <ArrowUpRight size={16} />
