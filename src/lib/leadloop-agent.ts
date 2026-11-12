@@ -53,7 +53,7 @@ export class LeadLoopAgent {
     }
     return duplicates;
   }
-  async chat(message: string, context: AgentContext = {}) {
+  async chat(message: string, context: AgentContext = {}): Promise<{ reply: string; needsApproval?: boolean; data?: any }> {
     const q = message.toLowerCase(), leads = context.leads || [], tasks = context.tasks || [], appointments = context.appointments || [];
     const invoices = context.invoices || [], expenses = context.expenses || [];
     if (/score|rank|hot lead|best lead|priority lead/.test(q)) {
