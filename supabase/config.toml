@@ -1,0 +1,4 @@
+# Supabase project configuration for LeadLoop SA.
+# JWT is verified inside the function so public enquiry links can be used without login.
+[functions.leadloop-api]
+verify_jwt = false

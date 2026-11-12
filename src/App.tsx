@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { auth, api, invitesClient } from '@appdeploy/client';
+import { auth, api, invitesClient } from './lib/platform';
+import { LeadLoopAgent } from './lib/leadloop-agent';
 import {
   Activity,
   ArrowUpRight,
@@ -9,7 +10,6 @@ import {
   CalendarDays,
   Check,
   ChevronDown,
-  CircleHelp,
   ClipboardList,
   CreditCard,
   FileText,
@@ -28,6 +28,7 @@ import {
   X,
   Zap,
   ChartNoAxesCombined,
+  type LucideIcon,
 } from 'lucide-react';
 
 type User = { userId: string; email?: string; name?: string };
@@ -40,6 +41,10 @@ type Workspace = {
   trialEndsAt?: string;
 };
 type RecordItem = { id: string; [key: string]: unknown };
+type InstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform?: string }>;
+};
 type Section =
   | 'Overview'
   | 'Leads'
@@ -108,6 +113,11 @@ function dateLabel(value?: string) {
   }).format(new Date(value));
 }
 
+function localDateTimeInput(value: Date) {
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`;
+}
+
 function monthDates(value: Date) {
   const first = new Date(value.getFullYear(), value.getMonth(), 1);
   const start = new Date(first);
@@ -119,14 +129,27 @@ function monthDates(value: Date) {
   });
 }
 
+function weekDates(value: Date) {
+  const start = new Date(value.getFullYear(), value.getMonth(), value.getDate());
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+  return Array.from({ length: 7 }, (_, index) => {
+    const day = new Date(start);
+    day.setDate(start.getDate() + index);
+    return day;
+  });
+}
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const [installPrompt, setInstallPrompt] = useState<InstallPromptEvent | null>(null);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [, setWorkspaces] = useState<Workspace[]>([]);
   const [section, setSection] = useState<Section>('Overview');
   const [calendarCursor, setCalendarCursor] = useState(() => new Date());
   const [selectedCalendarDate, setSelectedCalendarDate] = useState(() => new Date());
+  const [calendarView, setCalendarView] = useState<'day' | 'week' | 'month'>('month');
+  const [editingAppointment, setEditingAppointment] = useState<RecordItem | null>(null);
   const [records, setRecords] = useState<RecordItem[]>([]);
   const [overview, setOverview] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
@@ -139,6 +162,10 @@ export default function App() {
   const [aiQuestion, setAiQuestion] = useState('');
   const [aiAnswer, setAiAnswer] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
+  const [agentQuestion, setAgentQuestion] = useState('');
+  const [agentBusy, setAgentBusy] = useState(false);
+  const [agentMessages, setAgentMessages] = useState<Array<{ role: 'user' | 'agent'; text: string }>>([]);
+  const agent = useMemo(() => new LeadLoopAgent({ businessName: workspace?.name || 'LeadLoop SA' }), [workspace?.name]);
   const [form, setForm] = useState<Record<string, string>>({});
   const [workspaceName, setWorkspaceName] = useState('');
   const [industry, setIndustry] = useState('Professional services');
@@ -149,7 +176,7 @@ export default function App() {
     const match = window.location.hash.match(/^#\/enquiry\/([A-Za-z0-9-]+)$/);
     return match?.[1] || null;
   });
-  const [publicEnquiryToken, setPublicEnquiryToken] = useState<string | null>(null);
+  const [, setPublicEnquiryToken] = useState<string | null>(null);
   const [publicBusinessName, setPublicBusinessName] = useState('');
   const [publicForm, setPublicForm] = useState({ name: '', email: '', phone: '', company: '', serviceRequested: '', message: '', consent: false, website: '' });
   const [publicLoading, setPublicLoading] = useState(false);
@@ -158,6 +185,20 @@ export default function App() {
   const [publicEnquiryUrl, setPublicEnquiryUrl] = useState('');
   const [publicEnquiryBusy, setPublicEnquiryBusy] = useState(false);
   const [whatsappStatus, setWhatsappStatus] = useState<{ connected: boolean; status: string; canStartEmbeddedSignup: boolean; message: string } | null>(null);
+
+  useEffect(() => {
+    const captureInstallPrompt = (event: Event) => {
+      event.preventDefault();
+      setInstallPrompt(event as InstallPromptEvent);
+    };
+    const clearInstallPrompt = () => setInstallPrompt(null);
+    window.addEventListener('beforeinstallprompt', captureInstallPrompt);
+    window.addEventListener('appinstalled', clearInstallPrompt);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', captureInstallPrompt);
+      window.removeEventListener('appinstalled', clearInstallPrompt);
+    };
+  }, []);
 
   useEffect(() => {
     if (!publicRouteToken) return;
@@ -294,6 +335,17 @@ export default function App() {
     }
   }
 
+  async function installApp() {
+    if (!installPrompt) return;
+    try {
+      await installPrompt.prompt();
+      const choice = await installPrompt.userChoice;
+      if (choice.outcome === 'accepted') setInstallPrompt(null);
+    } catch {
+      setNotice('App installation could not be opened. Use Chrome menu > Install app.');
+    }
+  }
+
   async function createWorkspace() {
     if (!workspaceName.trim()) {
       setNotice('Enter a business name first.');
@@ -335,13 +387,19 @@ export default function App() {
       const payload = {
         ...form,
         amount: form.amount ? Number(form.amount) : undefined,
+        consentToContact: form.consentToContact === 'true',
       };
-      const result = await api.post(
-        '/api/workspaces/' + workspace.id + '/' + resource,
-        payload
-      );
-      setRecords(old => [result.data.item, ...old]);
+      const endpoint = '/api/workspaces/' + workspace.id + '/' + resource;
+      const result = section === 'Calendar' && editingAppointment
+        ? await api.put(endpoint + '/' + editingAppointment.id, payload)
+        : await api.post(endpoint, payload);
+      if (section === 'Calendar' && editingAppointment) {
+        setRecords(old => old.map(item => item.id === editingAppointment.id ? result.data.item : item));
+      } else {
+        setRecords(old => [result.data.item, ...old]);
+      }
       setForm({});
+      setEditingAppointment(null);
       setShowCreate(false);
       setNotice(
         section === 'Leads'
@@ -453,6 +511,31 @@ export default function App() {
     }
   }
 
+  async function askLeadLoopAgent() {
+    if (!workspace || !agentQuestion.trim() || agentBusy) return;
+    const question = agentQuestion.trim();
+    setAgentQuestion('');
+    setAgentMessages(old => [...old, { role: 'user', text: question }]);
+    setAgentBusy(true);
+    try {
+      const names = ['leads', 'customers', 'invoices', 'tasks', 'appointments', 'expenses'];
+      const pairs = await Promise.all(names.map(async name => {
+        const response = await api.get('/api/workspaces/' + workspace.id + '/' + name);
+        return [name, response.data.items || []] as const;
+      }));
+      const context = Object.fromEntries(pairs);
+      const result = await agent.chat(question, context);
+      let reply = result.reply;
+      if (result.needsApproval && result.data) {
+        const saved = await api.post('/api/workspaces/' + workspace.id + '/messages/drafts', result.data);
+        reply += '\\n\\n' + (saved.data.message || 'Draft saved in Messages for owner/admin approval. It has NOT been sent.');
+      }
+      setAgentMessages(old => [...old, { role: 'agent', text: reply }]);
+    } catch (error) {
+      setAgentMessages(old => [...old, { role: 'agent', text: error instanceof Error ? error.message : 'The LeadLoop agent could not complete that request.' }]);
+    } finally { setAgentBusy(false); }
+  }
+
   async function askAI() {
     if (!workspace || !aiQuestion.trim()) return;
     setAiBusy(true);
@@ -481,6 +564,7 @@ export default function App() {
   }
 
   const calendarDays = monthDates(calendarCursor);
+  const calendarWeek = weekDates(calendarCursor);
   const selectedDayAppointments = records
     .filter(item => item.startAt && new Date(String(item.startAt)).toDateString() === selectedCalendarDate.toDateString())
     .sort((a, b) => new Date(String(a.startAt)).getTime() - new Date(String(b.startAt)).getTime());
@@ -625,6 +709,7 @@ export default function App() {
             <a href="#built-for-sa">Built for SA</a>
           </nav>
           <div className="landing-nav-actions">
+            {installPrompt && <button className="landing-signin" onClick={installApp}>Install app</button>}
             <button className="landing-signin" onClick={signIn}>Sign in</button>
             <button className="primary landing-nav-cta" onClick={signIn}>
               Start free trial <ArrowUpRight size={16} />
@@ -1023,14 +1108,14 @@ export default function App() {
                 </button>
               </div>
               <div className="metric-grid">
-                {[
+                {([
                   ['Total leads', overview.leads || 0, Target],
                   ['Customers', overview.customers || 0, Users],
                   ['Open projects', overview.projects || 0, BriefcaseBusiness],
-                  ['Tasks due', overview.tasks || 0, CalendarDays],
+                  ['Open tasks', overview.tasks || 0, CalendarDays],
                   ['Revenue recorded', money(overview.revenue || 0), Wallet],
                   ['Outstanding', money(overview.outstanding || 0), CreditCard],
-                ].map(([label, value, Icon]) => (
+                ] as [string, string | number, LucideIcon][]).map(([label, value, Icon]) => (
                   <div className="metric-card" key={String(label)}>
                     <div className="metric-top">
                       <span>{label as string}</span>
@@ -1084,6 +1169,21 @@ export default function App() {
                   </button>
                 </div>
               </div>
+              <section className="leadloop-agent-panel">
+                <div className="leadloop-agent-heading">
+                  <div className="ai-orb small"><Sparkles /></div>
+                  <div><span className="eyebrow">RULE-BASED BUSINESS AGENT</span><h3>LeadLoop agent chat</h3><p>Uses your actual workspace records. Customer messages are never sent automatically.</p></div>
+                </div>
+                <div className="leadloop-agent-messages" aria-live="polite">
+                  {agentMessages.length === 0 && <div className="agent-bubble agent-reply">Hi. I can score leads, check follow-ups, review finances and appointments, find duplicates, and prepare consent-checked email drafts for approval.</div>}
+                  {agentMessages.map((item, index) => <div className={item.role === 'user' ? 'agent-bubble agent-user' : 'agent-bubble agent-reply'} key={index}>{item.text}</div>)}
+                  {agentBusy && <div className="agent-bubble agent-reply">Checking your workspace records…</div>}
+                </div>
+                <form className="leadloop-agent-compose" onSubmit={event => { event.preventDefault(); askLeadLoopAgent(); }}>
+                  <textarea rows={2} value={agentQuestion} onChange={event => setAgentQuestion(event.target.value)} placeholder="Ask your LeadLoop agent…" />
+                  <button className="primary" type="submit" disabled={agentBusy || !agentQuestion.trim()}>{agentBusy ? 'Working…' : 'Send'} <Send size={15} /></button>
+                </form>
+              </section>
             </>
           )}
           {section === 'Analytics' && (
@@ -1141,26 +1241,71 @@ export default function App() {
               <div className="calendar-layout">
                 <div className="panel calendar-panel">
                   <div className="calendar-toolbar">
-                    <button className="icon-btn" aria-label="Previous month" onClick={() => setCalendarCursor(new Date(calendarCursor.getFullYear(), calendarCursor.getMonth() - 1, 1))}><ChevronDown size={16} /></button>
-                    <h3>{new Intl.DateTimeFormat('en-ZA', { month: 'long', year: 'numeric' }).format(calendarCursor)}</h3>
-                    <button className="icon-btn" aria-label="Next month" onClick={() => setCalendarCursor(new Date(calendarCursor.getFullYear(), calendarCursor.getMonth() + 1, 1))}><ChevronDown size={16} style={{ transform: 'rotate(180deg)' }} /></button>
+                    <button className="icon-btn" aria-label="Previous period" onClick={() => {
+                      const next = new Date(calendarCursor);
+                      if (calendarView === 'month') next.setMonth(next.getMonth() - 1);
+                      else next.setDate(next.getDate() - (calendarView === 'week' ? 7 : 1));
+                      setCalendarCursor(next); setSelectedCalendarDate(next);
+                    }}><ChevronDown size={16} /></button>
+                    <h3>{calendarView === 'month'
+                      ? new Intl.DateTimeFormat('en-ZA', { month: 'long', year: 'numeric' }).format(calendarCursor)
+                      : calendarView === 'week'
+                        ? calendarWeek[0].toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' }) + ' – ' + calendarWeek[6].toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })
+                        : new Intl.DateTimeFormat('en-ZA', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(selectedCalendarDate)}</h3>
+                    <button className="icon-btn" aria-label="Next period" onClick={() => {
+                      const next = new Date(calendarCursor);
+                      if (calendarView === 'month') next.setMonth(next.getMonth() + 1);
+                      else next.setDate(next.getDate() + (calendarView === 'week' ? 7 : 1));
+                      setCalendarCursor(next); setSelectedCalendarDate(next);
+                    }}><ChevronDown size={16} style={{ transform: 'rotate(180deg)' }} /></button>
                     <button className="secondary" onClick={() => { const today = new Date(); setCalendarCursor(today); setSelectedCalendarDate(today); }}>Today</button>
                   </div>
-                  <div className="calendar-grid">
-                    {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => <div className="calendar-weekday" key={day}>{day}</div>)}
-                    {calendarDays.map(day => {
-                      const dayAppointments = records.filter(item => item.startAt && new Date(String(item.startAt)).toDateString() === day.toDateString());
-                      const inMonth = day.getMonth() === calendarCursor.getMonth();
-                      const selected = day.toDateString() === selectedCalendarDate.toDateString();
-                      return (
-                        <button key={day.toISOString()} className={'calendar-day ' + (!inMonth ? 'outside ' : '') + (selected ? 'selected' : '')} onClick={() => setSelectedCalendarDate(day)}>
-                          <span className="calendar-day-number">{day.getDate()}</span>
-                          {dayAppointments.slice(0, 2).map(item => <span className="calendar-event-dot" key={item.id}>{String(item.name || item.title || 'Appointment')}</span>)}
-                          {dayAppointments.length > 2 && <small>+{dayAppointments.length - 2} more</small>}
-                        </button>
-                      );
-                    })}
+                  <div className="calendar-view-switch">
+                    {(['day', 'week', 'month'] as const).map(view => (
+                      <button key={view} className={calendarView === view ? 'secondary active' : 'secondary'} onClick={() => { setCalendarView(view); setCalendarCursor(selectedCalendarDate); }}>
+                        {view[0].toUpperCase() + view.slice(1)}
+                      </button>
+                    ))}
                   </div>
+                  {calendarView === 'month' && (
+                    <div className="calendar-grid">
+                      {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => <div className="calendar-weekday" key={day}>{day}</div>)}
+                      {calendarDays.map(day => {
+                        const dayAppointments = records.filter(item => item.startAt && new Date(String(item.startAt)).toDateString() === day.toDateString());
+                        const inMonth = day.getMonth() === calendarCursor.getMonth();
+                        const selected = day.toDateString() === selectedCalendarDate.toDateString();
+                        return (
+                          <button key={day.toISOString()} className={'calendar-day ' + (!inMonth ? 'outside ' : '') + (selected ? 'selected' : '')} onClick={() => setSelectedCalendarDate(day)}>
+                            <span className="calendar-day-number">{day.getDate()}</span>
+                            {dayAppointments.slice(0, 2).map(item => <span className="calendar-event-dot" key={item.id}>{String(item.name || item.title || 'Appointment')}</span>)}
+                            {dayAppointments.length > 2 && <small>+{dayAppointments.length - 2} more</small>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {calendarView === 'week' && (
+                    <div className="calendar-grid calendar-week-grid">
+                      {calendarWeek.map(day => {
+                        const dayAppointments = records.filter(item => item.startAt && new Date(String(item.startAt)).toDateString() === day.toDateString());
+                        return (
+                          <button key={day.toISOString()} className={'calendar-day ' + (day.toDateString() === selectedCalendarDate.toDateString() ? 'selected' : '')} onClick={() => setSelectedCalendarDate(day)}>
+                            <span className="calendar-weekday">{day.toLocaleDateString('en-ZA', { weekday: 'short' })}</span>
+                            <span className="calendar-day-number">{day.getDate()}</span>
+                            {dayAppointments.slice(0, 4).map(item => <span className="calendar-event-dot" key={item.id}>{new Intl.DateTimeFormat('en-ZA', { hour: '2-digit', minute: '2-digit' }).format(new Date(String(item.startAt)))} · {String(item.name || item.title || 'Appointment')}</span>)}
+                            {dayAppointments.length > 4 && <small>+{dayAppointments.length - 4} more</small>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {calendarView === 'day' && (
+                    <div className="calendar-day-focus">
+                      <span className="eyebrow">SELECTED DAY</span>
+                      <h2>{new Intl.DateTimeFormat('en-ZA', { weekday: 'long', day: 'numeric', month: 'long' }).format(selectedCalendarDate)}</h2>
+                      <p>{selectedDayAppointments.length} scheduled appointment{selectedDayAppointments.length === 1 ? '' : 's'}</p>
+                    </div>
+                  )}
                 </div>
                 <div className="panel calendar-agenda">
                   <div className="panel-head">
@@ -1179,8 +1324,24 @@ export default function App() {
                       <select className="status-select" value={String(item.status || 'Confirmed')} onChange={e => updateStatus(item, e.target.value)}>
                         <option>Requested</option><option>Confirmed</option><option>In progress</option><option>Completed</option><option>Cancelled</option>
                       </select>
+                      <button className="secondary" onClick={() => {
+                        setEditingAppointment(item);
+                        setForm({
+                          name: String(item.name || item.title || ''),
+                          email: String(item.email || ''),
+                          client: String(item.client || ''),
+                          service: String(item.service || ''),
+                          startAt: localDateTimeInput(new Date(String(item.startAt))),
+                          endAt: localDateTimeInput(new Date(String(item.endAt))),
+                          assignedTo: String(item.assignedTo || ''),
+                          location: String(item.location || ''),
+                          status: String(item.status || 'Confirmed'),
+                          description: String(item.description || ''),
+                        });
+                        setShowCreate(true);
+                      }}>Edit / reschedule</button>
                     </div>
-                  )) : <div className="empty"><div className="empty-icon"><CalendarDays /></div><b>No appointments on this day</b><span>Select another date or create a new appointment.</span><button className="secondary" onClick={() => { setForm({ startAt: new Date(selectedCalendarDate.getFullYear(), selectedCalendarDate.getMonth(), selectedCalendarDate.getDate(), 9, 0).toISOString().slice(0, 16), endAt: new Date(selectedCalendarDate.getFullYear(), selectedCalendarDate.getMonth(), selectedCalendarDate.getDate(), 10, 0).toISOString().slice(0, 16) }); setShowCreate(true); }}>Add appointment for this day</button></div>}
+                  )) : <div className="empty"><div className="empty-icon"><CalendarDays /></div><b>No appointments on this day</b><span>Select another date or create a new appointment.</span><button className="secondary" onClick={() => { setForm({ startAt: localDateTimeInput(new Date(selectedCalendarDate.getFullYear(), selectedCalendarDate.getMonth(), selectedCalendarDate.getDate(), 9, 0)), endAt: localDateTimeInput(new Date(selectedCalendarDate.getFullYear(), selectedCalendarDate.getMonth(), selectedCalendarDate.getDate(), 10, 0)) }); setShowCreate(true); }}>Add appointment for this day</button></div>}
                 </div>
               </div>
             </>
@@ -1549,14 +1710,14 @@ export default function App() {
         </div>
       </main>
       {showCreate && (
-        <div className="modal-backdrop" onClick={() => setShowCreate(false)}>
+        <div className="modal-backdrop" onClick={() => { setShowCreate(false); setEditingAppointment(null); }}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-head">
               <div>
-                <span className="eyebrow">NEW RECORD</span>
-                <h2>{section === 'Calendar' ? 'New appointment' : 'Add ' + section.slice(0, -1)}</h2>
+                <span className="eyebrow">{editingAppointment ? 'UPDATE APPOINTMENT' : 'NEW RECORD'}</span>
+                <h2>{section === 'Calendar' ? (editingAppointment ? 'Edit appointment' : 'New appointment') : 'Add ' + section.slice(0, -1)}</h2>
               </div>
-              <button className="icon-btn" onClick={() => setShowCreate(false)}>
+              <button className="icon-btn" onClick={() => { setShowCreate(false); setEditingAppointment(null); }}>
                 <X />
               </button>
             </div>
@@ -1594,6 +1755,30 @@ export default function App() {
                 </div>
               </>
             )}
+            {section === 'Leads' && (
+              <>
+                <div className="form-row">
+                  <label>
+                    Phone number
+                    <input value={form.phone || ''} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="+27..." />
+                  </label>
+                  <label>
+                    Company
+                    <input value={form.company || ''} onChange={e => setForm({ ...form, company: e.target.value })} placeholder="Company name (optional)" />
+                  </label>
+                </div>
+                <label>
+                  Lead source
+                  <select value={form.source || 'Manual entry'} onChange={e => setForm({ ...form, source: e.target.value })}>
+                    <option>Manual entry</option><option>Website enquiry</option><option>Phone call</option><option>Email</option><option>Referral</option><option>Walk-in</option><option>Social media</option><option>Other</option>
+                  </select>
+                </label>
+                <label className="public-consent">
+                  <input type="checkbox" checked={form.consentToContact === 'true'} onChange={e => setForm({ ...form, consentToContact: e.target.checked ? 'true' : 'false' })} />
+                  <span>This contact has agreed that the business may contact them about their enquiry.</span>
+                </label>
+              </>
+            )}
             {section === 'Customers' && (
               <>
                 <div className="form-row">
@@ -1615,6 +1800,10 @@ export default function App() {
                   <select value={form.source || 'Manual entry'} onChange={e => setForm({ ...form, source: e.target.value })}>
                     <option>Manual entry</option><option>Website enquiry</option><option>Phone call</option><option>WhatsApp</option><option>Email</option><option>Referral</option><option>Walk-in</option><option>Other</option>
                   </select>
+                </label>
+                <label className="public-consent">
+                  <input type="checkbox" checked={form.consentToContact === 'true'} onChange={e => setForm({ ...form, consentToContact: e.target.checked ? 'true' : 'false' })} />
+                  <span>This customer has agreed that the business may contact them.</span>
                 </label>
               </>
             )}
@@ -1690,7 +1879,7 @@ export default function App() {
               onClick={saveRecord}
               disabled={loading}
             >
-              {loading ? 'Saving…' : 'Save record'} <Check size={16} />
+              {loading ? 'Saving…' : editingAppointment ? 'Save appointment changes' : 'Save record'} <Check size={16} />
             </button>
           </div>
         </div>
