@@ -1248,6 +1248,22 @@ export default function App() {
                       <select className="status-select" value={String(item.status || 'Confirmed')} onChange={e => updateStatus(item, e.target.value)}>
                         <option>Requested</option><option>Confirmed</option><option>In progress</option><option>Completed</option><option>Cancelled</option>
                       </select>
+                      <button className="secondary" onClick={() => {
+                        setEditingAppointment(item);
+                        setForm({
+                          name: String(item.name || item.title || ''),
+                          email: String(item.email || ''),
+                          client: String(item.client || ''),
+                          service: String(item.service || ''),
+                          startAt: localDateTimeInput(new Date(String(item.startAt))),
+                          endAt: localDateTimeInput(new Date(String(item.endAt))),
+                          assignedTo: String(item.assignedTo || ''),
+                          location: String(item.location || ''),
+                          status: String(item.status || 'Confirmed'),
+                          description: String(item.description || ''),
+                        });
+                        setShowCreate(true);
+                      }}>Edit / reschedule</button>
                     </div>
                   )) : <div className="empty"><div className="empty-icon"><CalendarDays /></div><b>No appointments on this day</b><span>Select another date or create a new appointment.</span><button className="secondary" onClick={() => { setForm({ startAt: localDateTimeInput(new Date(selectedCalendarDate.getFullYear(), selectedCalendarDate.getMonth(), selectedCalendarDate.getDate(), 9, 0)), endAt: localDateTimeInput(new Date(selectedCalendarDate.getFullYear(), selectedCalendarDate.getMonth(), selectedCalendarDate.getDate(), 10, 0)) }); setShowCreate(true); }}>Add appointment for this day</button></div>}
                 </div>
@@ -1618,14 +1634,14 @@ export default function App() {
         </div>
       </main>
       {showCreate && (
-        <div className="modal-backdrop" onClick={() => setShowCreate(false)}>
+        <div className="modal-backdrop" onClick={() => { setShowCreate(false); setEditingAppointment(null); }}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-head">
               <div>
-                <span className="eyebrow">NEW RECORD</span>
-                <h2>{section === 'Calendar' ? 'New appointment' : 'Add ' + section.slice(0, -1)}</h2>
+                <span className="eyebrow">{editingAppointment ? 'UPDATE APPOINTMENT' : 'NEW RECORD'}</span>
+                <h2>{section === 'Calendar' ? (editingAppointment ? 'Edit appointment' : 'New appointment') : 'Add ' + section.slice(0, -1)}</h2>
               </div>
-              <button className="icon-btn" onClick={() => setShowCreate(false)}>
+              <button className="icon-btn" onClick={() => { setShowCreate(false); setEditingAppointment(null); }}>
                 <X />
               </button>
             </div>
@@ -1787,7 +1803,7 @@ export default function App() {
               onClick={saveRecord}
               disabled={loading}
             >
-              {loading ? 'Saving…' : 'Save record'} <Check size={16} />
+              {loading ? 'Saving…' : editingAppointment ? 'Save appointment changes' : 'Save record'} <Check size={16} />
             </button>
           </div>
         </div>

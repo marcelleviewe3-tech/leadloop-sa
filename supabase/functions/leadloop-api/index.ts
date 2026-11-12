@@ -336,10 +336,32 @@ Deno.serve(async req => {
         if (!validResource(resource)) throw new HttpError("Unknown workspace resource.", 404);
         if (!roleCanWrite(access.role, resource)) throw new HttpError("Your role cannot update records in this section.", 403);
         const b = obj(await bodyOf(req)), patch: any = {};
-        if (typeof b.status === "string") patch.status = clean(b.status, 40);
-        if (typeof b.description === "string") patch.description = clean(b.description, 2000);
+        if (resource === "appointments") {
+          const existing = (await listRecords(workspaceId, "appointments")).find(item => item.id === id);
+          if (!existing) throw new HttpError("Appointment not found.", 404);
+          const startText = clean(b.startAt || existing.startAt, 80), endText = clean(b.endAt || existing.endAt, 80);
+          const start = new Date(startText), end = new Date(endText);
+          if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || end <= start) throw new HttpError("Choose a valid start and end time. The end must be after the start.");
+          const assignedTo = typeof b.assignedTo === "string" ? clean(b.assignedTo, 120) : clean(existing.assignedTo, 120);
+          const conflict = (await listRecords(workspaceId, "appointments")).find(item => {
+            if (item.id === id || ["Cancelled", "Completed"].includes(String(item.status || ""))) return false;
+            if (assignedTo && clean(item.assignedTo, 120) && clean(item.assignedTo, 120) !== assignedTo) return false;
+            const a = new Date(String(item.startAt || "")).getTime(), z = new Date(String(item.endAt || "")).getTime();
+            return Number.isFinite(a) && Number.isFinite(z) && start.getTime() < z && end.getTime() > a;
+          });
+          if (conflict) throw new HttpError("That time overlaps an existing appointment. Choose another time or assign a different staff member.", 409);
+          for (const key of ["name", "client", "email", "phone", "service", "location", "description", "status", "assignedTo"]) {
+            if (typeof b[key] === "string") patch[key] = clean(b[key], key === "description" ? 2000 : key === "location" ? 500 : 180);
+          }
+          patch.startAt = start.toISOString();
+          patch.endAt = end.toISOString();
+        } else {
+          if (typeof b.status === "string") patch.status = clean(b.status, 40);
+          if (typeof b.description === "string") patch.description = clean(b.description, 2000);
+        }
         await updateRecord(workspaceId, resource, id, patch);
-        return json({ updated: true });
+        const item = resource === "appointments" ? (await listRecords(workspaceId, resource)).find(row => row.id === id) : undefined;
+        return json({ updated: true, ...(item ? { item } : {}) });
       }
     }
     if (path.match(/^\/api\/invites\/[^/]+\/join$/) && method === "POST") {
