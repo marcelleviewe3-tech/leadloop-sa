@@ -186,3 +186,15 @@ create policy "owners and admins can view invitations"
 -- Invite writes and public enquiry token operations are server-only.
 -- No anonymous policies are granted. Edge Functions must validate requests
 -- and use the service-role key only in server-side runtime secrets.
+
+
+-- Compatibility fields required by the original LeadLoop workspace profile.
+alter table public.workspaces add column if not exists trial_started_at timestamptz not null default now();
+alter table public.workspaces add column if not exists trial_ends_at timestamptz not null default (now() + interval '14 days');
+alter table public.workspaces add column if not exists settings jsonb not null default '{}'::jsonb;
+alter table public.workspace_messages add column if not exists consent_to_contact boolean not null default false;
+alter table public.workspace_messages add column if not exists data jsonb not null default '{}'::jsonb;
+alter table public.public_enquiry_tokens add column if not exists token_value text;
+
+-- The token value is readable only by the server-side service-role client.
+-- RLS is enabled and deliberately has no authenticated or anonymous SELECT policy.

@@ -1,58 +1,33 @@
 # LeadLoop SA: standalone backend migration
 
 ## Safety boundary
-- `main` is the imported AppDeploy snapshot and remains unchanged during this work.
+- `main` is the imported AppDeploy snapshot and remains unchanged.
 - All migration work belongs on `migration/standalone-backend`.
-- The live AppDeploy deployment remains the production reference until the replacement passes parity tests and is deliberately cut over.
-- Never copy AppDeploy secrets, service credentials, or customer data into Git.
+- The existing live AppDeploy deployment remains the production reference until staging parity is verified and the owner deliberately cuts over.
+- Never commit service-role keys, AI provider keys, customer data, or copied AppDeploy secrets.
 
 ## Target architecture
-- Frontend: existing React 19 + Vite + TypeScript application.
-- Identity: Supabase Auth.
-- Database: Supabase Postgres with row-level security (RLS).
-- Server-side API: Supabase Edge Functions using the service-role key only inside the function runtime.
-- AI: a server-side provider adapter; provider keys stay in Edge Function secrets.
-- Realtime: Supabase Realtime subscriptions scoped to the authenticated workspace.
-- Hosting: static frontend hosting after the backend parity work is complete.
+- Frontend: existing React 19 + Vite application.
+- Identity: Supabase Auth email magic links.
+- Database: Supabase Postgres with row-level security.
+- API: Supabase Edge Function `leadloop-api` using server-side service-role credentials only.
+- AI: server-side OpenAI-compatible provider adapter; provider key stored only as an Edge Function secret.
+- Realtime: not required for the current UI contract; add workspace-scoped Supabase Realtime only if/when the product needs live cross-client updates.
 
-## Existing AppDeploy dependencies to remove
-- `@appdeploy/client` in `src/App.tsx`: authentication, API calls, and invitation-link helpers.
-- `@appdeploy/sdk` in `backend/index.ts` and realtime files: routing, auth middleware, database, AI, invitation and websocket services.
+## Migration implementation in this branch
+- [x] Add Supabase browser client and public environment template.
+- [x] Add relational schema and RLS foundation for workspaces, members, records, messages, activity, invites and public enquiry tokens.
+- [x] Add compatibility adapter for the existing frontend API/auth/invite call sites.
+- [x] Add the `leadloop-api` Edge Function source with authentication, role checks, workspace CRUD, public enquiries, invitations, message approval, appointment overlap checks and AI tool actions.
+- [x] Add Edge Function config with JWT verification disabled at the gateway and bearer-token validation inside the handler, so public enquiry links work without login.
+- [x] Remove AppDeploy-specific backend source from this migration branch; `main` retains the original rollback source.
+- [x] Remove AppDeploy-specific Vite build environment dependencies.
+- [ ] Apply SQL to a staging Supabase project.
+- [ ] Configure Auth email redirect URLs and frontend environment variables.
+- [ ] Deploy the Edge Function and set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `AI_PROVIDER_API_KEY` as server-side secrets.
+- [ ] Run `npm run typecheck`, `npm run build`, and `tests/supabase-smoke-test.md` against staging.
+- [ ] Verify data migration/import strategy for any real AppDeploy customer records; no customer data is copied automatically by this code.
+- [ ] Obtain owner approval for a deliberate production cutover and rollback plan.
 
-## Data model mapping
-- Dynamic per-workspace AppDeploy tables become `workspaces`, `workspace_members`, and `workspace_records`.
-- Resource types: leads, customers, projects, tasks, quotes, invoices, expenses, campaigns, payments, appointments.
-- Messages and activity use dedicated `workspace_messages` and `workspace_activity` tables.
-- Public enquiry links use `public_enquiry_tokens`; public submissions must go through a validated Edge Function, never a direct anonymous table insert.
-- Invitations use hashed one-time codes in `workspace_invites`; acceptance must validate email, expiry, and current auth identity.
-
-## API parity checklist
-The current frontend calls these route families. Each must be implemented and tested before removing the AppDeploy client:
-- `GET /api/health`
-- `GET, POST /api/public/enquiries/:token`
-- `GET /api/workspaces`
-- `POST /api/workspaces`
-- `GET /api/workspaces/:id/overview`
-- `GET /api/workspaces/:id/members`
-- `POST /api/workspaces/:id/invites`
-- `POST /api/invites/:code/join`
-- `GET, POST /api/workspaces/:id/public-enquiry`
-- `GET /api/workspaces/:id/integrations/whatsapp`
-- `GET /api/workspaces/:id/messages`
-- `POST /api/workspaces/:id/messages/:messageId/approve`
-- `POST /api/workspaces/:id/messages/:messageId/mark-sent`
-- `GET, POST /api/workspaces/:id/:resource`
-- `PUT /api/workspaces/:id/:resource/:recordId`
-- `GET /api/workspaces/:id/assistant`
-
-## Migration stages
-1. Add the Supabase schema, RLS policies, client configuration and environment template.
-2. Create Edge Functions for auth-aware workspace operations, public enquiries, invitations, messaging approvals, AI assistant and WhatsApp status.
-3. Replace `@appdeploy/client` with a compatibility adapter while preserving the existing component behavior.
-4. Replace AppDeploy backend and realtime handlers with Edge Functions and Supabase Realtime.
-5. Add automated tests for roles, cross-workspace isolation, public enquiry validation, invitations, invoice/calendar flows, assistant and mobile UI.
-6. Configure Supabase and hosting secrets, deploy a staging copy, and verify all flows.
-7. Cut over only after owner approval and a tested rollback plan.
-
-## Not yet production-ready
-This branch is migration scaffolding, not a completed backend replacement. The existing app still imports AppDeploy packages until API and auth parity is implemented. Do not deploy this branch as a standalone production app yet. A Supabase project URL/key and Edge Function secrets must be configured outside GitHub.
+## Important
+This branch is a migration implementation, not a live cutover. It cannot authenticate or persist data until the SQL is applied and the Supabase project secrets and Edge Function are configured. The AI assistant returns a clear configuration error until `AI_PROVIDER_API_KEY` is set. WhatsApp remains status-only; no Meta messaging or delivery is claimed.

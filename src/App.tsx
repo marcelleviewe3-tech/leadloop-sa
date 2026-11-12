@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { auth, api, invitesClient } from '@appdeploy/client';
+import { auth, api, invitesClient } from './lib/platform';
 import {
   Activity,
   ArrowUpRight,
