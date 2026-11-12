@@ -1,0 +1,121 @@
+[
+  {
+    "name": "Business owner shares a public enquiry form and receives a lead review task",
+    "sanity": true,
+    "viewport": "desktop",
+    "covers": [
+      "public marketing landing page and sign-in entry",
+      "workspace WhatsApp integration status and Meta setup guardrail",
+      "owner authentication",
+      "workspace creation",
+      "public enquiry form activation",
+      "public customer enquiry submission",
+      "tenant-scoped lead creation",
+      "automatic linked lead-review task",
+      "dashboard metrics"
+    ],
+    "description": "Verifies a business owner can enable a public enquiry link and a visitor submission is saved as a lead with an automatic review task.",
+    "steps": [
+      "Open the public LeadLoop landing page and review its platform sections and free-trial call to action",
+      "Select Start free trial and sign in as a new business owner",
+      "Create a workspace named Northstar Services",
+      "Open Settings and enable the public enquiry form",
+      "Inspect the WhatsApp Business integration card and its connection status",
+      "Copy and open the public enquiry link in a visitor session",
+      "Submit an enquiry for Sam Test with email sam@example.com and the message I need a quote",
+      "Sign in to the Northstar Services workspace and open Leads",
+      "Open Tasks and return to the dashboard"
+    ],
+    "expected": "The public landing page explains the available LeadLoop workspace capabilities and opens the existing sign-in flow from its free-trial call to action. Settings shows the WhatsApp Business integration as not connected, explains that LeadLoop Meta setup and approval are still required, and does not allow a false connection. The public form identifies Northstar Services, the visitor sees a submission confirmation, Sam Test appears as a New website enquiry lead, a linked Open task named Review new lead: Sam Test appears, and the dashboard lead count includes the submission."
+  },
+  {
+    "name": "Employee accepts an invitation and receives assigned access",
+    "viewport": "desktop",
+    "covers": [
+      "employee invitation creation",
+      "invite link joining",
+      "workspace membership",
+      "role-based access"
+    ],
+    "description": "Verifies an invited employee can join the correct business workspace and access its permitted records.",
+    "steps": [
+      "Actor A signs in as workspace owner and creates an employee invitation for staff@example.com",
+      "Actor A copies the generated invitation link",
+      "Actor B signs in with staff@example.com and opens the invitation link",
+      "Actor B accepts the invitation"
+    ],
+    "expected": "Actor B is added to the invited workspace as an employee and can view workspace records without gaining owner-only team controls."
+  },
+  {
+    "name": "Create and update an invoice with durable state",
+    "viewport": "desktop",
+    "covers": [
+      "invoice creation",
+      "invoice update",
+      "built-in LeadLoop calendar navigation",
+      "appointment creation with date and time",
+      "appointment overlap prevention",
+      "workspace-scoped appointment persistence",
+      "workspace data persistence",
+      "ZAR formatting"
+    ],
+    "description": "Verifies a finance-capable workspace member can create and update an invoice and see the saved state after reload.",
+    "steps": [
+      "Open Invoices",
+      "Create an invoice for Client Example with amount 1250 and status Draft",
+      "Change its status to Sent",
+      "Refresh the page",
+      "Open Calendar and create a consultation for Client Example from 10:00 to 11:00 on a free date",
+      "Create a second appointment for the same staff member that overlaps the first appointment",
+      "Refresh Calendar"
+    ],
+    "expected": "The invoice remains visible with the amount R1,250.00 and status Sent. The LeadLoop Calendar shows the saved consultation on its selected date after refresh, and the overlapping appointment is rejected with a clear conflict message."
+  },
+  {
+    "name": "Use the unified AI to draft and approve a customer reply",
+    "viewport": "desktop",
+    "covers": [
+      "single unified AI orchestration",
+      "shared workspace context",
+      "AI message drafting from exact lead record",
+      "message draft persistence",
+      "human approval gate",
+      "consent guardrail",
+      "no automatic external delivery",
+      "pre-filled email compose handoff",
+      "manual sent-status attestation"
+    ],
+    "description": "Verifies the unified AI drafts an email from an exact lead record, approval opens a pre-filled email compose handoff, and manual status is clearly distinguished from provider-verified delivery.",
+    "steps": [
+      "Create a new public enquiry for Sam Example with email sam@example.com and contact consent enabled",
+      "Open the unified AI assistant",
+      "Ask: Draft an email reply to the newest lead, Sam Example, acknowledging the enquiry and asking what service they need. Do not send it.",
+      "Open Messages",
+      "Approve the saved draft as the workspace owner",
+      "Open the Gmail compose link and verify the recipient, subject and body are pre-filled",
+      "Send the email manually in Gmail, return to LeadLoop and select Mark sent manually"
+    ],
+    "expected": "The approved email has a pre-filled mailto compose link. After the user manually sends it and marks it sent, LeadLoop displays Sent (marked manually) and explicitly states that provider delivery is not verified."
+  },
+  {
+    "name": "Reject incomplete public enquiries and unauthorized actions",
+    "viewport": "mobile",
+    "covers": [
+      "public enquiry required-field validation",
+      "email-or-phone contact requirement",
+      "contact consent requirement",
+      "employee permission boundary",
+      "responsive mobile navigation",
+      "approval role boundary"
+    ],
+    "description": "Verifies a visitor cannot submit an incomplete enquiry or skip consent and non-owner members cannot approve customer messages.",
+    "steps": [
+      "Open a public enquiry link on a mobile viewport",
+      "Leave the name empty and attempt to submit",
+      "Enter a name but leave both email and phone empty",
+      "Provide contact details but leave the consent checkbox unchecked",
+      "Sign in as an employee and attempt to approve a pending message draft"
+    ],
+    "expected": "Incomplete submissions are blocked, contact consent is required, no invalid lead is created, and employees cannot approve customer messages."
+  }
+]
