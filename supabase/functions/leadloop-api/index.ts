@@ -2,7 +2,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info",
+  "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-client-info, x-leadloop-webhook-secret, x-hub-signature-256",
   "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
 };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
@@ -75,6 +75,70 @@ async function messageList(workspaceId: string) {
   if (error) throw error;
   return (data || []).map(m => ({ ...obj(m.data), id: m.id, workspaceId, channel: m.channel, recipient: m.recipient, subject: m.subject, body: m.body, status: m.status, approvalStatus: m.approval_status, deliveryStatus: m.delivery_status, createdBy: m.created_by, approvedBy: m.approved_by, createdAt: m.created_at, updatedAt: m.updated_at }));
 }
+
+async function publicEnquiryUrlForWorkspace(workspaceId: string) {
+  const { data: workspace, error: workspaceError } = await admin.from("workspaces").select("public_enquiry_enabled,settings").eq("id", workspaceId).maybeSingle();
+  if (workspaceError) throw workspaceError;
+  if (!workspace?.public_enquiry_enabled) return null;
+  const { data: tokenRow, error: tokenError } = await admin.from("public_enquiry_tokens").select("token_value").eq("workspace_id", workspaceId).is("revoked_at", null).maybeSingle();
+  if (tokenError) throw tokenError;
+  const settings = obj(workspace.settings);
+  const baseUrl = clean(settings.publicAppUrl || Deno.env.get("LEADLOOP_PUBLIC_APP_URL"), 500).replace(/\/+$/, "");
+  if (!baseUrl || !tokenRow?.token_value) return null;
+  return baseUrl + "/#/enquiry/" + tokenRow.token_value;
+}
+
+async function createMissedCallAIDraft(workspaceName: string, callerPhone: string, enquiryUrl: string) {
+  const key = Deno.env.get("AI_PROVIDER_API_KEY");
+  if (!key) throw new HttpError("AI_PROVIDER_API_KEY is not configured for LeadLoop.", 503);
+  const prompt = "Write a concise, friendly WhatsApp follow-up for a business that missed a customer's phone call. Say the business noticed the missed call, invite the person to explain what they need using the enquiry link, and do not claim anyone has called them back or booked anything. Include this exact link unchanged: " + enquiryUrl + ". Keep it under 500 characters.";
+  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: "You write honest, helpful customer-service WhatsApp drafts for South African small businesses. Never invent facts, offers, availability or promises. Return only the message text." },
+        { role: "user", content: "Business: " + clean(workspaceName, 100) + "\nCaller number: " + clean(callerPhone, 50) + "\n" + prompt }
+      ],
+      temperature: 0.4,
+      max_tokens: 220
+    })
+  });
+  if (!response.ok) throw new HttpError("The AI provider could not draft the missed-call reply. Check the AI key and provider account.", 503);
+  const payload = await response.json();
+  let body = clean(payload.choices?.[0]?.message?.content, 1200);
+  if (!body) throw new HttpError("The AI provider returned an empty missed-call draft.", 503);
+  if (!body.includes(enquiryUrl)) body = body.trim() + "\n\nEnquiry form: " + enquiryUrl;
+  return body.slice(0, 1500);
+}
+
+async function listMissedCalls(workspaceId: string) {
+  const { data: calls, error } = await admin.from("workspace_missed_calls").select("*").eq("workspace_id", workspaceId).order("created_at", { ascending: false }).limit(200);
+  if (error) throw error;
+  const ids = (calls || []).map(c => c.message_id).filter(Boolean);
+  let messages: any[] = [];
+  if (ids.length) {
+    const { data, error: messageError } = await admin.from("workspace_messages").select("id,body,status,approval_status,delivery_status").in("id", ids);
+    if (messageError) throw messageError;
+    messages = data || [];
+  }
+  const byId = new Map(messages.map(m => [m.id, m]));
+  return (calls || []).map(call => {
+    const message = call.message_id ? byId.get(call.message_id) : null;
+    const digits = clean(call.caller_phone, 50).replace(/[^0-9]/g, "");
+    return {
+      ...call,
+      draft: message?.body || null,
+      messageStatus: message?.status || null,
+      deliveryStatus: message?.delivery_status || null,
+      whatsappUrl: call.contact_permission === "opted_in" && message?.body && digits
+        ? "https://wa.me/" + digits + "?text=" + encodeURIComponent(message.body)
+        : null
+    };
+  });
+}
+
 async function handleAI(workspaceId: string, user: User, access: Access, question: string) {
   const key = Deno.env.get("AI_PROVIDER_API_KEY");
   if (!key) throw new HttpError("LeadLoop AI is not configured yet. Add AI_PROVIDER_API_KEY to the Supabase Edge Function secrets.", 503);
@@ -225,6 +289,74 @@ Deno.serve(async req => {
       return json({ submitted: true, leadId: lead.id, taskCreated, taskId, message: `Your enquiry has been sent to ${clean(workspace.name, 100)}.` }, 201);
     }
 
+
+    if (path === "/api/webhooks/missed-call" && method === "POST") {
+      const b = obj(await bodyOf(req));
+      const workspaceId = clean(b.workspaceId, 80);
+      const providerCallId = clean(b.providerCallId || b.callId, 200);
+      const callerPhone = clean(b.callerPhone || b.from, 50).replace(/[^0-9+]/g, "");
+      const suppliedSecret = req.headers.get("x-leadloop-webhook-secret") || "";
+      if (!workspaceId || !providerCallId || callerPhone.replace(/\D/g, "").length < 8 || !suppliedSecret)
+        throw new HttpError("Workspace, call ID, caller number and webhook secret are required.", 400);
+      const { data: integration, error: integrationError } = await admin.from("workspace_call_integrations").select("*").eq("workspace_id", workspaceId).maybeSingle();
+      if (integrationError) throw integrationError;
+      const settings = obj(integration?.settings);
+      if (!integration || !settings.webhook_secret_hash || await sha(suppliedSecret) !== settings.webhook_secret_hash)
+        throw new HttpError("Invalid missed-call webhook credentials.", 401);
+      const callOutcome = ["missed", "no_answer", "busy", "cancelled"].includes(clean(b.callOutcome, 30)) ? clean(b.callOutcome, 30) : "missed";
+      if (callOutcome === "cancelled") return json({ recorded: false, ignored: true, reason: "Call was cancelled." });
+      const provider = clean(b.provider, 40) || integration.provider || "webhook";
+      const { data: existing, error: existingError } = await admin.from("workspace_missed_calls").select("id,follow_up_status,message_id").eq("workspace_id", workspaceId).eq("provider", provider).eq("provider_call_id", providerCallId).maybeSingle();
+      if (existingError) throw existingError;
+      if (existing) return json({ recorded: true, duplicate: true, missedCallId: existing.id, followUpStatus: existing.follow_up_status });
+      const { data: workspace, error: workspaceError } = await admin.from("workspaces").select("name").eq("id", workspaceId).maybeSingle();
+      if (workspaceError) throw workspaceError;
+      if (!workspace) throw new HttpError("Workspace not found.", 404);
+      const { data: call, error: insertError } = await admin.from("workspace_missed_calls").insert({
+        workspace_id: workspaceId,
+        provider,
+        provider_call_id: providerCallId,
+        caller_phone: callerPhone,
+        business_phone: clean(b.businessPhone || b.to || integration.business_phone_number, 50),
+        call_started_at: b.callStartedAt && Number.isFinite(new Date(b.callStartedAt).getTime()) ? new Date(b.callStartedAt).toISOString() : null,
+        call_ended_at: b.callEndedAt && Number.isFinite(new Date(b.callEndedAt).getTime()) ? new Date(b.callEndedAt).toISOString() : null,
+        call_outcome: callOutcome,
+        follow_up_status: "new",
+        contact_permission: "unknown",
+        metadata: { source: "authenticated_missed_call_webhook" }
+      }).select("*").single();
+      if (insertError) throw insertError;
+      let enquiryUrl: string | null = null;
+      try { enquiryUrl = await publicEnquiryUrlForWorkspace(workspaceId); } catch (e) { console.error("Missed-call enquiry link lookup failed", e); }
+      if (!enquiryUrl) {
+        await admin.from("workspace_missed_calls").update({ failure_reason: "The public enquiry form is not enabled or LEADLOOP_PUBLIC_APP_URL is not configured." }).eq("id", call.id);
+        return json({ recorded: true, draftCreated: false, missedCallId: call.id, reason: "Enable the public enquiry form and configure the public app URL to draft a reply." }, 201);
+      }
+      try {
+        const draft = await createMissedCallAIDraft(workspace.name, callerPhone, enquiryUrl);
+        const { data: message, error: messageError } = await admin.from("workspace_messages").insert({
+          workspace_id: workspaceId,
+          channel: "whatsapp",
+          recipient: callerPhone,
+          subject: "",
+          body: draft,
+          status: "Pending approval",
+          approval_status: "Pending",
+          delivery_status: "Not sent - WhatsApp consent has not been recorded",
+          consent_to_contact: false,
+          data: { direction: "outbound_draft", source: "missed_call_ai", missedCallId: call.id, enquiryUrl, contactPermission: "unknown" }
+        }).select("id").single();
+        if (messageError) throw messageError;
+        await admin.from("workspace_missed_calls").update({ follow_up_status: "drafted", enquiry_url: enquiryUrl, message_id: message.id, failure_reason: null, updated_at: new Date().toISOString() }).eq("id", call.id);
+        await audit(workspaceId, "leadloop-ai", "ai_agent", "missed_call_reply_drafted", "missed_calls", call.id, "AI drafted a WhatsApp missed-call follow-up. It was not sent because contact permission is unknown.");
+        return json({ recorded: true, draftCreated: true, autoSent: false, contactPermission: "unknown", missedCallId: call.id, messageId: message.id }, 201);
+      } catch (draftError) {
+        const reason = draftError instanceof Error ? draftError.message : "AI draft generation failed.";
+        await admin.from("workspace_missed_calls").update({ failure_reason: reason, updated_at: new Date().toISOString() }).eq("id", call.id);
+        return json({ recorded: true, draftCreated: false, missedCallId: call.id, reason }, 201);
+      }
+    }
+
     const user = await userFrom(req);
     if (path === "/api/workspaces" && method === "GET") {
       const { data: memberships, error } = await admin.from("workspace_members").select("workspace_id,role").eq("user_id", user.id);
@@ -279,7 +411,8 @@ Deno.serve(async req => {
       }
       if (tail === "public-enquiry" && method === "POST") {
         if (!canManage(access.role)) throw new HttpError("Only workspace owners and admins can manage the public enquiry form.", 403);
-        const enabled = obj(await bodyOf(req)).enabled === true;
+        const body = obj(await bodyOf(req));
+        const enabled = body.enabled === true;
         if (!enabled) {
           await admin.from("public_enquiry_tokens").update({ revoked_at: new Date().toISOString() }).eq("workspace_id", workspaceId).is("revoked_at", null);
           const { error } = await admin.from("workspaces").update({ public_enquiry_enabled: false, public_enquiry_token_hash: null, updated_at: new Date().toISOString() }).eq("id", workspaceId);
@@ -290,14 +423,149 @@ Deno.serve(async req => {
         await admin.from("public_enquiry_tokens").update({ revoked_at: new Date().toISOString() }).eq("workspace_id", workspaceId).is("revoked_at", null);
         const { error: tokenErr } = await admin.from("public_enquiry_tokens").insert({ token_hash: hash, token_value: token, workspace_id: workspaceId });
         if (tokenErr) throw tokenErr;
-        const { error } = await admin.from("workspaces").update({ public_enquiry_enabled: true, public_enquiry_token_hash: hash, updated_at: new Date().toISOString() }).eq("id", workspaceId);
+        const origin = req.headers.get("origin") || "";
+        let publicAppUrl = "";
+        try {
+          const parsedOrigin = new URL(origin);
+          if (parsedOrigin.protocol === "https:" || parsedOrigin.hostname === "localhost") publicAppUrl = parsedOrigin.origin;
+        } catch { /* No browser origin supplied. */ }
+        const nextSettings = publicAppUrl ? { ...obj(access.workspace.settings), publicAppUrl } : obj(access.workspace.settings);
+        const { error } = await admin.from("workspaces").update({ public_enquiry_enabled: true, public_enquiry_token_hash: hash, settings: nextSettings, updated_at: new Date().toISOString() }).eq("id", workspaceId);
         if (error) throw error;
-        return json({ enabled: true, token });
+        return json({ enabled: true, token, publicUrl: publicAppUrl ? publicAppUrl + "/#/enquiry/" + token : null });
       }
+
+      if (tail === "integrations/calls" && method === "GET") {
+        const { data: integration, error } = await admin.from("workspace_call_integrations").select("provider,business_phone_number,connection_status,provider_account_ref,updated_at").eq("workspace_id", workspaceId).maybeSingle();
+        if (error) throw error;
+        return json({ configured: !!integration, integration: integration || null });
+      }
+      if (tail === "integrations/calls" && method === "POST") {
+        if (!canManage(access.role)) throw new HttpError("Only workspace owners and admins can configure missed-call capture.", 403);
+        const b = obj(await bodyOf(req));
+        const secret = randomCode() + randomCode();
+        const current = await admin.from("workspace_call_integrations").select("settings").eq("workspace_id", workspaceId).maybeSingle();
+        if (current.error) throw current.error;
+        const settings = { ...obj(current.data?.settings), webhook_secret_hash: await sha(secret), webhook_secret_created_at: new Date().toISOString() };
+        const { error } = await admin.from("workspace_call_integrations").upsert({
+          workspace_id: workspaceId,
+          provider: "webhook",
+          business_phone_number: clean(b.businessPhoneNumber, 50) || null,
+          connection_status: "pending",
+          settings,
+          updated_at: new Date().toISOString()
+        }, { onConflict: "workspace_id" });
+        if (error) throw error;
+        const webhookUrl = url.replace(/\/$/, "") + "/functions/v1/leadloop-api?path=" + encodeURIComponent("/api/webhooks/missed-call");
+        await audit(workspaceId, user.id, "user", "missed_call_webhook_created", "call_integrations", workspaceId, "Created a private missed-call webhook endpoint.");
+        return json({ configured: true, provider: "webhook", webhookUrl, secret, headerName: "x-leadloop-webhook-secret", requiredFields: ["workspaceId", "providerCallId", "callerPhone"], warning: "The secret is shown once. Store it in the phone/call provider's secure webhook configuration. This endpoint records missed calls but does not detect calls by itself." }, 201);
+      }
+      if (tail === "missed-calls" && method === "GET") {
+        return json({ items: await listMissedCalls(workspaceId) });
+      }
+      const permissionMatch = tail.match(/^missed-calls\/([^/]+)\/permission$/);
+      if (permissionMatch && method === "POST") {
+        if (!["owner", "admin", "manager"].includes(access.role)) throw new HttpError("Your role cannot update customer contact permission.", 403);
+        const id = decodeURIComponent(permissionMatch[1]), b = obj(await bodyOf(req));
+        const permission = clean(b.permission, 30), evidence = clean(b.evidence, 500);
+        if (!["opted_in", "opted_out", "unknown"].includes(permission)) throw new HttpError("Choose opted_in, opted_out or unknown.", 400);
+        if (permission === "opted_in" && evidence.length < 10) throw new HttpError("Record how the customer explicitly agreed to WhatsApp contact before marking them opted in.", 400);
+        const { data: call, error: callError } = await admin.from("workspace_missed_calls").select("id,message_id").eq("workspace_id", workspaceId).eq("id", id).maybeSingle();
+        if (callError) throw callError;
+        if (!call) throw new HttpError("Missed call not found.", 404);
+        const { error: updateError } = await admin.from("workspace_missed_calls").update({
+          contact_permission: permission,
+          contact_permission_evidence: permission === "opted_in" ? evidence : null,
+          contact_permission_recorded_by: user.id,
+          contact_permission_recorded_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        }).eq("workspace_id", workspaceId).eq("id", id);
+        if (updateError) throw updateError;
+        if (call.message_id) {
+          const { data: message, error: messageReadError } = await admin.from("workspace_messages").select("data").eq("workspace_id", workspaceId).eq("id", call.message_id).maybeSingle();
+          if (messageReadError) throw messageReadError;
+          const { error: messageUpdateError } = await admin.from("workspace_messages").update({
+            consent_to_contact: permission === "opted_in",
+            data: { ...obj(message?.data), contactPermission: permission, contactPermissionEvidence: permission === "opted_in" ? evidence : null, contactPermissionRecordedBy: user.id, contactPermissionRecordedAt: new Date().toISOString() },
+            delivery_status: permission === "opted_in" ? "Not sent - awaiting owner/admin approval" : "Not sent - customer WhatsApp permission not confirmed"
+          }).eq("workspace_id", workspaceId).eq("id", call.message_id);
+          if (messageUpdateError) throw messageUpdateError;
+        }
+        await audit(workspaceId, user.id, "user", "missed_call_contact_permission_updated", "missed_calls", id, "Updated customer WhatsApp contact permission to " + permission + ".");
+        return json({ updated: true, permission, canApproveDraft: permission === "opted_in" });
+      }
+
+
       if (tail === "integrations/whatsapp" && method === "GET") {
-        const settings = obj(access.workspace.settings), connected = settings.whatsappConnectionStatus === "connected" && !!settings.whatsappBusinessAccountId;
-        return json({ channel: "whatsapp", connected, status: connected ? "connected" : "not_connected", phoneDisplay: settings.whatsappPhoneDisplay || null, connectedAt: settings.whatsappConnectedAt || null, canStartEmbeddedSignup: false, message: connected ? "A WhatsApp account is recorded. Live handling still requires the approved Meta webhook and messaging services." : "Meta setup is not complete. The Meta developer app, permissions and webhook verification must be completed before businesses can connect their own accounts." });
+        const { data: account, error: accountError } = await admin.from("workspace_whatsapp_accounts").select("waba_id,phone_number_id,display_phone_number,business_name,connection_status,connected_at,access_token_expires_at,last_error").eq("workspace_id", workspaceId).maybeSingle();
+        if (accountError) throw accountError;
+        const configured = !!Deno.env.get("META_APP_ID") && !!Deno.env.get("META_CONFIG_ID") && !!Deno.env.get("META_APP_SECRET");
+        return json({
+          channel: "whatsapp",
+          connected: account?.connection_status === "connected",
+          status: account?.connection_status || "not_connected",
+          phoneDisplay: account?.display_phone_number || null,
+          businessName: account?.business_name || null,
+          connectedAt: account?.connected_at || null,
+          canStartEmbeddedSignup: configured,
+          metaConfigured: configured,
+          message: configured
+            ? (account?.connection_status === "connected" ? "WhatsApp Business is connected. Inbound webhook subscription and approved message templates still need to be verified." : "Meta credentials are configured. Complete the WhatsApp Embedded Signup flow to connect this business's own number.")
+            : "Meta setup is still required. Configure META_APP_ID, META_APP_SECRET and META_CONFIG_ID in Supabase Edge Function secrets before businesses can connect their own WhatsApp Business accounts."
+        });
       }
+      if (tail === "integrations/whatsapp/config" && method === "GET") {
+        if (!canManage(access.role)) throw new HttpError("Only workspace owners and admins can connect WhatsApp.", 403);
+        const appId = Deno.env.get("META_APP_ID") || "";
+        const configId = Deno.env.get("META_CONFIG_ID") || "";
+        return json({ configured: !!(appId && configId && Deno.env.get("META_APP_SECRET")), appId, configId, graphApiVersion: Deno.env.get("META_GRAPH_API_VERSION") || "v24.0" });
+      }
+      if (tail === "integrations/whatsapp/exchange" && method === "POST") {
+        if (!canManage(access.role)) throw new HttpError("Only workspace owners and admins can connect WhatsApp.", 403);
+        const b = obj(await bodyOf(req));
+        const code = clean(b.code, 4000), wabaId = clean(b.wabaId, 100), phoneNumberId = clean(b.phoneNumberId, 100);
+        const appId = Deno.env.get("META_APP_ID"), appSecret = Deno.env.get("META_APP_SECRET");
+        const apiVersion = Deno.env.get("META_GRAPH_API_VERSION") || "v24.0";
+        if (!appId || !appSecret) throw new HttpError("Meta app credentials are not configured in Supabase Edge Function secrets.", 503);
+        if (!code || !wabaId || !phoneNumberId) throw new HttpError("Meta authorization code, WhatsApp Business Account ID and phone number ID are required.", 400);
+        const tokenUrl = new URL("https://graph.facebook.com/" + apiVersion + "/oauth/access_token");
+        tokenUrl.searchParams.set("client_id", appId);
+        tokenUrl.searchParams.set("client_secret", appSecret);
+        tokenUrl.searchParams.set("code", code);
+        if (b.redirectUri) tokenUrl.searchParams.set("redirect_uri", clean(b.redirectUri, 1000));
+        const tokenResponse = await fetch(tokenUrl.toString());
+        const tokenPayload = await tokenResponse.json();
+        if (!tokenResponse.ok || !tokenPayload.access_token) throw new HttpError("Meta could not exchange the signup code. Check the Meta app configuration and redirect URI.", 400);
+        const accessToken = String(tokenPayload.access_token);
+        const phoneUrl = new URL("https://graph.facebook.com/" + apiVersion + "/" + encodeURIComponent(phoneNumberId));
+        phoneUrl.searchParams.set("fields", "display_phone_number,verified_name,whatsapp_business_account");
+        phoneUrl.searchParams.set("access_token", accessToken);
+        const phoneResponse = await fetch(phoneUrl.toString());
+        const phonePayload = await phoneResponse.json();
+        if (!phoneResponse.ok) throw new HttpError("Meta did not verify the selected WhatsApp phone number. Check that the Embedded Signup result belongs to this business.", 400);
+        const verifiedWaba = clean(phonePayload.whatsapp_business_account?.id, 100);
+        if (verifiedWaba && verifiedWaba !== wabaId) throw new HttpError("The phone number does not belong to the selected WhatsApp Business Account.", 403);
+        const { data: secretRef, error: secretError } = await admin.rpc("store_workspace_whatsapp_token", { p_workspace_id: workspaceId, p_access_token: accessToken });
+        if (secretError) throw new HttpError("WhatsApp token could not be stored securely in Supabase Vault.", 500);
+        const expiresAt = Number(tokenPayload.expires_in) > 0 ? new Date(Date.now() + Number(tokenPayload.expires_in) * 1000).toISOString() : null;
+        const { error: saveError } = await admin.from("workspace_whatsapp_accounts").upsert({
+          workspace_id: workspaceId,
+          waba_id: wabaId,
+          phone_number_id: phoneNumberId,
+          display_phone_number: clean(phonePayload.display_phone_number, 50),
+          business_name: clean(phonePayload.verified_name, 180),
+          connection_status: "connected",
+          token_secret_ref: secretRef,
+          access_token_expires_at: expiresAt,
+          connected_at: new Date().toISOString(),
+          last_error: null,
+          updated_at: new Date().toISOString()
+        }, { onConflict: "workspace_id" });
+        if (saveError) throw saveError;
+        await audit(workspaceId, user.id, "user", "whatsapp_business_connected", "integrations", workspaceId, "Connected a customer-owned WhatsApp Business account.");
+        return json({ connected: true, phoneDisplay: clean(phonePayload.display_phone_number, 50), businessName: clean(phonePayload.verified_name, 180), expiresAt });
+      }
+
       if (tail === "messages" && method === "GET") return json({ items: await messageList(workspaceId) });
       if (tail === "messages/drafts" && method === "POST") {
         const b = obj(await bodyOf(req)), recordId = clean(b.recordId, 100);
