@@ -121,6 +121,10 @@ function monthDates(value: Date) {
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const [showAuth, setShowAuth] = useState(false);
+  const [authEmail, setAuthEmail] = useState('');
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authMessage, setAuthMessage] = useState('');
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [section, setSection] = useState<Section>('Overview');
   const [calendarCursor, setCalendarCursor] = useState(() => new Date());
@@ -281,13 +285,25 @@ export default function App() {
     }
   }
 
-  async function signIn() {
+  function signIn() {
+    setAuthMessage('');
+    setShowAuth(true);
+  }
+
+  async function sendSignInLink() {
+    if (!authEmail.trim()) {
+      setAuthMessage('Enter your email address to continue.');
+      return;
+    }
+    setAuthBusy(true);
+    setAuthMessage('');
     try {
-      await auth.signInWithRedirect();
+      await auth.signInWithMagicLink(authEmail.trim());
+      setAuthMessage('Secure sign-in link sent. Open the email on this device to finish signing in.');
     } catch (error) {
-      setNotice(
-        error instanceof Error ? error.message : 'Sign-in failed. Please retry.'
-      );
+      setAuthMessage(error instanceof Error ? error.message : 'Could not send the sign-in link. Please try again.');
+    } finally {
+      setAuthBusy(false);
     }
   }
 
@@ -808,6 +824,35 @@ export default function App() {
           <span>LEADLOOP SA · More enquiries. More jobs. Less missed opportunities.</span>
           <button onClick={signIn}>Sign in <ArrowUpRight size={14} /></button>
         </footer>
+        {showAuth && (
+          <div className="auth-overlay" role="presentation" onClick={event => { if (event.target === event.currentTarget) setShowAuth(false); }}>
+            <section className="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+              <button className="auth-close" aria-label="Close sign in" onClick={() => setShowAuth(false)}><X size={18} /></button>
+              <div className="brand">
+                <span className="brand-mark">L</span>
+                <span>leadloop<span className="brand-dot">.</span></span>
+              </div>
+              <div className="eyebrow">SECURE EMAIL SIGN-IN</div>
+              <h2 id="auth-title">Your business starts here.</h2>
+              <p>Enter your email and we'll send a secure sign-in link. New users can create their LeadLoop account through the same flow.</p>
+              <label className="auth-email-label">
+                Email address
+                <input
+                  type="email"
+                  autoComplete="email"
+                  value={authEmail}
+                  onChange={event => setAuthEmail(event.target.value)}
+                  placeholder="you@example.com"
+                />
+              </label>
+              <button className="primary full" onClick={sendSignInLink} disabled={authBusy || !authEmail.trim()}>
+                {authBusy ? 'Sending secure link…' : 'Email me a sign-in link'} <ArrowUpRight size={16} />
+              </button>
+              {authMessage && <p className="auth-message" role="status">{authMessage}</p>}
+              <small>You'll return to LeadLoop after confirming the link in your inbox.</small>
+            </section>
+          </div>
+        )}
       </main>
     );
 

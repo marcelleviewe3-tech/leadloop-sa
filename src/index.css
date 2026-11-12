@@ -1407,3 +1407,95 @@ td small {
   .whatsapp-benefits { grid-template-columns: 1fr; }
   .integration-title-row { align-items: flex-start; flex-direction: column; }
 }
+
+
+.auth-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: #05090dcc;
+  backdrop-filter: blur(12px);
+}
+.auth-modal {
+  position: relative;
+  width: min(460px, 100%);
+  padding: 34px;
+  border: 1px solid #34434d;
+  border-radius: 22px;
+  background: linear-gradient(145deg, #17242c, #101923 70%);
+  box-shadow: 0 30px 100px #0009;
+}
+.auth-modal > .brand {
+  margin-bottom: 30px;
+}
+.auth-modal h2 {
+  margin: 12px 0;
+  color: #f0f5f5;
+  font: 800 30px/1.1 Manrope, sans-serif;
+  letter-spacing: -1.2px;
+}
+.auth-modal > p {
+  color: #9eacb5;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.auth-close {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #34434d;
+  border-radius: 9px;
+  background: #1a2832;
+  color: #b9c5cc;
+}
+.auth-email-label {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 22px 0 16px;
+  color: #c3cdd2;
+  font-size: 12px;
+  font-weight: 700;
+}
+.auth-email-label input {
+  width: 100%;
+  border: 1px solid #34444f;
+  border-radius: 10px;
+  padding: 13px 14px;
+  outline: none;
+  background: #0b131c;
+  color: #f0f5f5;
+}
+.auth-email-label input:focus {
+  border-color: #c8f76d;
+}
+.auth-message {
+  padding: 12px;
+  border: 1px solid #405344;
+  border-radius: 10px;
+  background: #17271f;
+  color: #c8e5b0 !important;
+}
+.auth-modal small {
+  display: block;
+  margin-top: 17px;
+  color: #84939d;
+  font-size: 11px;
+  line-height: 1.6;
+  text-align: center;
+}
+@media (max-width: 520px) {
+  .auth-modal {
+    padding: 26px 21px;
+  }
+  .auth-modal h2 {
+    font-size: 26px;
+  }
+}

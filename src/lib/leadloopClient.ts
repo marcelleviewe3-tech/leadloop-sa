@@ -20,15 +20,12 @@ export const auth = {
       name: String(data.user.user_metadata?.full_name || data.user.user_metadata?.name || ''),
     };
   },
-  async signInWithRedirect() {
-    const email = window.prompt('Enter your email address. LeadLoop will send you a secure sign-in link.');
-    if (!email?.trim()) return;
+  async signInWithMagicLink(email: string) {
     const { error } = await supabase.auth.signInWithOtp({
       email: email.trim().toLowerCase(),
       options: { emailRedirectTo: window.location.origin + window.location.pathname },
     });
     if (error) throw error;
-    window.alert('Your secure sign-in link has been sent. Open the email on this device to continue.');
   },
   async signOut() {
     const { error } = await supabase.auth.signOut();
