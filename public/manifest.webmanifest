@@ -10,6 +10,18 @@
   "theme_color": "#0b1019",
   "icons": [
     {
+      "src": "./leadloop-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./leadloop-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
       "src": "./leadloop-icon.svg",
       "sizes": "any",
       "type": "image/svg+xml",
