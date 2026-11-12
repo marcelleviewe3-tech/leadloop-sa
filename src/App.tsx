@@ -335,6 +335,7 @@ export default function App() {
       const payload = {
         ...form,
         amount: form.amount ? Number(form.amount) : undefined,
+        consentToContact: form.consentToContact === 'true',
       };
       const result = await api.post(
         '/api/workspaces/' + workspace.id + '/' + resource,
@@ -1592,6 +1593,30 @@ export default function App() {
                   <label>Assigned staff<input value={form.assignedTo || ''} onChange={e => setForm({ ...form, assignedTo: e.target.value })} placeholder="Staff member (optional)" /></label>
                   <label>Location / room<input value={form.location || ''} onChange={e => setForm({ ...form, location: e.target.value })} placeholder="Address, room or online" /></label>
                 </div>
+              </>
+            )}
+            {section === 'Leads' && (
+              <>
+                <div className="form-row">
+                  <label>
+                    Phone number
+                    <input value={form.phone || ''} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="+27..." />
+                  </label>
+                  <label>
+                    Company
+                    <input value={form.company || ''} onChange={e => setForm({ ...form, company: e.target.value })} placeholder="Company name (optional)" />
+                  </label>
+                </div>
+                <label>
+                  Lead source
+                  <select value={form.source || 'Manual entry'} onChange={e => setForm({ ...form, source: e.target.value })}>
+                    <option>Manual entry</option><option>Website enquiry</option><option>Phone call</option><option>Email</option><option>Referral</option><option>Walk-in</option><option>Social media</option><option>Other</option>
+                  </select>
+                </label>
+                <label className="public-consent">
+                  <input type="checkbox" checked={form.consentToContact === 'true'} onChange={e => setForm({ ...form, consentToContact: e.target.checked ? 'true' : 'false' })} />
+                  <span>This contact has agreed that the business may contact them about their enquiry.</span>
+                </label>
               </>
             )}
             {section === 'Customers' && (
