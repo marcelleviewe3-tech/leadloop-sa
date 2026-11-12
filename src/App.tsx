@@ -9,7 +9,6 @@ import {
   CalendarDays,
   Check,
   ChevronDown,
-  CircleHelp,
   ClipboardList,
   CreditCard,
   FileText,
@@ -123,7 +122,6 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [section, setSection] = useState<Section>('Overview');
   const [calendarCursor, setCalendarCursor] = useState(() => new Date());
   const [selectedCalendarDate, setSelectedCalendarDate] = useState(() => new Date());
@@ -149,7 +147,7 @@ export default function App() {
     const match = window.location.hash.match(/^#\/enquiry\/([A-Za-z0-9-]+)$/);
     return match?.[1] || null;
   });
-  const [publicEnquiryToken, setPublicEnquiryToken] = useState<string | null>(null);
+  const [, setPublicEnquiryToken] = useState<string | null>(null);
   const [publicBusinessName, setPublicBusinessName] = useState('');
   const [publicForm, setPublicForm] = useState({ name: '', email: '', phone: '', company: '', serviceRequested: '', message: '', consent: false, website: '' });
   const [publicLoading, setPublicLoading] = useState(false);
@@ -185,7 +183,6 @@ export default function App() {
             const response = await api.get('/api/workspaces');
             if (!alive) return;
             const list = response.data.workspaces || [];
-            setWorkspaces(list);
             const pending = invitesClient.getPendingCode();
             if (pending) {
               setNotice(
@@ -307,7 +304,6 @@ export default function App() {
       });
       const created = result.data.workspace as Workspace;
       setWorkspace(created);
-      setWorkspaces(old => [created, ...old]);
       setWorkspaceName('');
       setNotice(
         'Your business workspace is ready. Your full-feature trial has started.'
@@ -438,7 +434,6 @@ export default function App() {
       await api.post('/api/invites/' + code + '/join', {});
       invitesClient.clearPendingCode();
       const result = await api.get('/api/workspaces');
-      setWorkspaces(result.data.workspaces || []);
       setWorkspace((result.data.workspaces || [])[0] || null);
       setNotice('You have joined the business workspace.');
       setForm({});
@@ -1023,14 +1018,14 @@ export default function App() {
                 </button>
               </div>
               <div className="metric-grid">
-                {[
+                {([
                   ['Total leads', overview.leads || 0, Target],
                   ['Customers', overview.customers || 0, Users],
                   ['Open projects', overview.projects || 0, BriefcaseBusiness],
                   ['Tasks due', overview.tasks || 0, CalendarDays],
                   ['Revenue recorded', money(overview.revenue || 0), Wallet],
                   ['Outstanding', money(overview.outstanding || 0), CreditCard],
-                ].map(([label, value, Icon]) => (
+                ] as Array<[string, string | number, typeof Target]>).map(([label, value, Icon]) => (
                   <div className="metric-card" key={String(label)}>
                     <div className="metric-top">
                       <span>{label as string}</span>
