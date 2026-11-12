@@ -22,6 +22,7 @@
 - [x] Add Edge Function config with JWT verification disabled at the gateway and bearer-token validation inside the handler, so public enquiry links work without login.
 - [x] Remove AppDeploy-specific backend source from this migration branch; `main` retains the original rollback source.
 - [x] Remove AppDeploy-specific Vite build environment dependencies.
+- [ ] Re-enable Supabase per-PR preview branches in Project Settings → Integrations (currently disabled by the project).
 - [ ] Apply SQL to a staging Supabase project.
 - [ ] Configure Auth email redirect URLs and frontend environment variables.
 - [ ] Deploy the Edge Function and set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `AI_PROVIDER_API_KEY` as server-side secrets.

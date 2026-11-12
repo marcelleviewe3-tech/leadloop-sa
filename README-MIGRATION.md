@@ -22,6 +22,8 @@ This branch is an isolated migration copy. The original `main` branch and the li
 
 ## Supabase setup (do this before deploying this branch)
 
+**Preview status:** the connected Supabase GitHub app currently reports that “Create a new preview branch per PR” is disabled. In the Supabase project dashboard, open **Project Settings → Integrations** and re-enable preview branch creation if you want the draft PR to receive an isolated preview database. The PR remains a draft and has not changed production.
+
 1. The Supabase GitHub integration expects migrations under `supabase/migrations/`. This branch includes `supabase/migrations/20261112110000_leadloop_standalone.sql` for the preview branch. For a separate fresh staging project without GitHub preview, open **SQL Editor** and run `supabase/schema.sql` once. Do not run both against the same database.
 2. In **Project Settings → API**, copy the Project URL and anon/public key. Put them in the frontend host as `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
 3. In **Authentication → URL Configuration**, add the deployed site URL to the allowed redirect URLs. Enable email sign-in / magic links.
