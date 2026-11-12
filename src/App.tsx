@@ -1165,26 +1165,71 @@ export default function App() {
               <div className="calendar-layout">
                 <div className="panel calendar-panel">
                   <div className="calendar-toolbar">
-                    <button className="icon-btn" aria-label="Previous month" onClick={() => setCalendarCursor(new Date(calendarCursor.getFullYear(), calendarCursor.getMonth() - 1, 1))}><ChevronDown size={16} /></button>
-                    <h3>{new Intl.DateTimeFormat('en-ZA', { month: 'long', year: 'numeric' }).format(calendarCursor)}</h3>
-                    <button className="icon-btn" aria-label="Next month" onClick={() => setCalendarCursor(new Date(calendarCursor.getFullYear(), calendarCursor.getMonth() + 1, 1))}><ChevronDown size={16} style={{ transform: 'rotate(180deg)' }} /></button>
+                    <button className="icon-btn" aria-label="Previous period" onClick={() => {
+                      const next = new Date(calendarCursor);
+                      if (calendarView === 'month') next.setMonth(next.getMonth() - 1);
+                      else next.setDate(next.getDate() - (calendarView === 'week' ? 7 : 1));
+                      setCalendarCursor(next); setSelectedCalendarDate(next);
+                    }}><ChevronDown size={16} /></button>
+                    <h3>{calendarView === 'month'
+                      ? new Intl.DateTimeFormat('en-ZA', { month: 'long', year: 'numeric' }).format(calendarCursor)
+                      : calendarView === 'week'
+                        ? calendarWeek[0].toLocaleDateString('en-ZA', { day: 'numeric', month: 'short' }) + ' – ' + calendarWeek[6].toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' })
+                        : new Intl.DateTimeFormat('en-ZA', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(selectedCalendarDate)}</h3>
+                    <button className="icon-btn" aria-label="Next period" onClick={() => {
+                      const next = new Date(calendarCursor);
+                      if (calendarView === 'month') next.setMonth(next.getMonth() + 1);
+                      else next.setDate(next.getDate() + (calendarView === 'week' ? 7 : 1));
+                      setCalendarCursor(next); setSelectedCalendarDate(next);
+                    }}><ChevronDown size={16} style={{ transform: 'rotate(180deg)' }} /></button>
                     <button className="secondary" onClick={() => { const today = new Date(); setCalendarCursor(today); setSelectedCalendarDate(today); }}>Today</button>
                   </div>
-                  <div className="calendar-grid">
-                    {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => <div className="calendar-weekday" key={day}>{day}</div>)}
-                    {calendarDays.map(day => {
-                      const dayAppointments = records.filter(item => item.startAt && new Date(String(item.startAt)).toDateString() === day.toDateString());
-                      const inMonth = day.getMonth() === calendarCursor.getMonth();
-                      const selected = day.toDateString() === selectedCalendarDate.toDateString();
-                      return (
-                        <button key={day.toISOString()} className={'calendar-day ' + (!inMonth ? 'outside ' : '') + (selected ? 'selected' : '')} onClick={() => setSelectedCalendarDate(day)}>
-                          <span className="calendar-day-number">{day.getDate()}</span>
-                          {dayAppointments.slice(0, 2).map(item => <span className="calendar-event-dot" key={item.id}>{String(item.name || item.title || 'Appointment')}</span>)}
-                          {dayAppointments.length > 2 && <small>+{dayAppointments.length - 2} more</small>}
-                        </button>
-                      );
-                    })}
+                  <div className="calendar-view-switch">
+                    {(['day', 'week', 'month'] as const).map(view => (
+                      <button key={view} className={calendarView === view ? 'secondary active' : 'secondary'} onClick={() => { setCalendarView(view); setCalendarCursor(selectedCalendarDate); }}>
+                        {view[0].toUpperCase() + view.slice(1)}
+                      </button>
+                    ))}
                   </div>
+                  {calendarView === 'month' && (
+                    <div className="calendar-grid">
+                      {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => <div className="calendar-weekday" key={day}>{day}</div>)}
+                      {calendarDays.map(day => {
+                        const dayAppointments = records.filter(item => item.startAt && new Date(String(item.startAt)).toDateString() === day.toDateString());
+                        const inMonth = day.getMonth() === calendarCursor.getMonth();
+                        const selected = day.toDateString() === selectedCalendarDate.toDateString();
+                        return (
+                          <button key={day.toISOString()} className={'calendar-day ' + (!inMonth ? 'outside ' : '') + (selected ? 'selected' : '')} onClick={() => setSelectedCalendarDate(day)}>
+                            <span className="calendar-day-number">{day.getDate()}</span>
+                            {dayAppointments.slice(0, 2).map(item => <span className="calendar-event-dot" key={item.id}>{String(item.name || item.title || 'Appointment')}</span>)}
+                            {dayAppointments.length > 2 && <small>+{dayAppointments.length - 2} more</small>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {calendarView === 'week' && (
+                    <div className="calendar-grid calendar-week-grid">
+                      {calendarWeek.map(day => {
+                        const dayAppointments = records.filter(item => item.startAt && new Date(String(item.startAt)).toDateString() === day.toDateString());
+                        return (
+                          <button key={day.toISOString()} className={'calendar-day ' + (day.toDateString() === selectedCalendarDate.toDateString() ? 'selected' : '')} onClick={() => setSelectedCalendarDate(day)}>
+                            <span className="calendar-weekday">{day.toLocaleDateString('en-ZA', { weekday: 'short' })}</span>
+                            <span className="calendar-day-number">{day.getDate()}</span>
+                            {dayAppointments.slice(0, 4).map(item => <span className="calendar-event-dot" key={item.id}>{new Intl.DateTimeFormat('en-ZA', { hour: '2-digit', minute: '2-digit' }).format(new Date(String(item.startAt)))} · {String(item.name || item.title || 'Appointment')}</span>)}
+                            {dayAppointments.length > 4 && <small>+{dayAppointments.length - 4} more</small>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {calendarView === 'day' && (
+                    <div className="calendar-day-focus">
+                      <span className="eyebrow">SELECTED DAY</span>
+                      <h2>{new Intl.DateTimeFormat('en-ZA', { weekday: 'long', day: 'numeric', month: 'long' }).format(selectedCalendarDate)}</h2>
+                      <p>{selectedDayAppointments.length} scheduled appointment{selectedDayAppointments.length === 1 ? '' : 's'}</p>
+                    </div>
+                  )}
                 </div>
                 <div className="panel calendar-agenda">
                   <div className="panel-head">
