@@ -132,6 +132,8 @@ export default function App() {
   const [section, setSection] = useState<Section>('Overview');
   const [calendarCursor, setCalendarCursor] = useState(() => new Date());
   const [selectedCalendarDate, setSelectedCalendarDate] = useState(() => new Date());
+  const [calendarView, setCalendarView] = useState<'day' | 'week' | 'month'>('month');
+  const [editingAppointment, setEditingAppointment] = useState<RecordItem | null>(null);
   const [records, setRecords] = useState<RecordItem[]>([]);
   const [overview, setOverview] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
