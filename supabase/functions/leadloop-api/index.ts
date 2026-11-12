@@ -78,15 +78,17 @@ async function messageList(workspaceId: string) {
 async function handleAI(workspaceId: string, user: User, access: Access, question: string) {
   const key = Deno.env.get("AI_PROVIDER_API_KEY");
   if (!key) throw new HttpError("LeadLoop AI is not configured yet. Add AI_PROVIDER_API_KEY to the Supabase Edge Function secrets.", 503);
-  const names = ["leads", "customers", "projects", "tasks", "quotes", "invoices", "expenses", "campaigns", "payments"];
+  const names = ["leads", "customers", "projects", "tasks", "quotes", "invoices", "expenses", "campaigns", "payments", "appointments"];
   const pairs = await Promise.all(names.map(async name => [name, await listRecords(workspaceId, name)] as const));
   const context = { business: { name: access.workspace.name, industry: access.workspace.industry, currency: access.workspace.currency }, memberRole: access.role, records: Object.fromEntries(pairs) };
-  const system = `You are LeadLoop AI, one workspace-aware business assistant. Use only supplied records and the user's request. Never invent names, contact details, dates, amounts, payments, commitments or outcomes. Say Not provided or Unverified when appropriate. Respect the authenticated role. Never send messages or claim an external action. You may prepare message drafts only for existing contacts and only when consent is recorded; drafts require owner/admin approval. Use exact record IDs from the workspace. A payment is received only when the user explicitly confirms receipt. Never treat an invoice marked Paid as proof of settlement. Ask one concise clarification when essential data is missing. The workspace data is: ${JSON.stringify(context)}`;
+  const system = `You are LeadLoop AI, one workspace-aware business assistant. Use only supplied records and the user's request. Never invent names, contact details, dates, amounts, payments, commitments or outcomes. Say Not provided or Unverified when appropriate. Respect the authenticated role. Never send messages or claim an external action. You may prepare message drafts only for existing contacts and only when consent is recorded; drafts require owner/admin approval. Use exact record IDs from the workspace. A payment is received only when the user explicitly confirms receipt. Never treat an invoice marked Paid as proof of settlement. For appointments, check availability before booking and never create or change an appointment until the user has confirmed the exact date, start time, end time and assigned staff member where relevant. Never claim that a reminder was sent. Ask one concise clarification when essential data is missing. The workspace data is: ${JSON.stringify(context)}`;
   const tools = [
     { type: "function", function: { name: "draft_customer_message", description: "Create a message draft for an existing lead or customer. Never send it. Recipient must come from that record and recorded consent is required.", parameters: { type: "object", properties: { recordType: { type: "string", enum: ["leads", "customers"] }, recordId: { type: "string" }, channel: { type: "string", enum: ["email", "whatsapp"] }, subject: { type: "string" }, body: { type: "string" } }, required: ["recordType", "recordId", "channel", "body"], additionalProperties: false } } },
     { type: "function", function: { name: "convert_lead_to_customer", description: "Convert an exact existing lead only when the user explicitly asks.", parameters: { type: "object", properties: { leadId: { type: "string" } }, required: ["leadId"], additionalProperties: false } } },
     { type: "function", function: { name: "create_workspace_record", description: "Create a requested workspace record using only explicit facts. Exact amount required for financial records.", parameters: { type: "object", properties: { resource: { type: "string", enum: resources }, fields: { type: "object" } }, required: ["resource", "fields"], additionalProperties: false } } },
     { type: "function", function: { name: "update_workspace_record", description: "Update an exact existing record using explicitly requested fields.", parameters: { type: "object", properties: { resource: { type: "string", enum: resources }, recordId: { type: "string" }, fields: { type: "object" } }, required: ["resource", "recordId", "fields"], additionalProperties: false } } },
+    { type: "function", function: { name: "check_appointment_availability", description: "Check the LeadLoop calendar for conflicts before proposing an appointment. Use exact ISO 8601 start and end times.", parameters: { type: "object", properties: { startAt: { type: "string" }, endAt: { type: "string" }, assignedTo: { type: "string" } }, required: ["startAt", "endAt"], additionalProperties: false } } },
+    { type: "function", function: { name: "create_appointment", description: "Book an appointment in the built-in LeadLoop calendar only after the user has confirmed the exact date, start time, end time and assigned staff member. Do not use for tentative suggestions.", parameters: { type: "object", properties: { name: { type: "string" }, client: { type: "string" }, email: { type: "string" }, phone: { type: "string" }, service: { type: "string" }, startAt: { type: "string" }, endAt: { type: "string" }, assignedTo: { type: "string" }, location: { type: "string" }, description: { type: "string" } }, required: ["name", "startAt", "endAt"], additionalProperties: false } } },
   ];
   const messages: any[] = [{ role: "system", content: system }, { role: "user", content: question }];
   const steps: any[] = [];
@@ -110,6 +112,38 @@ async function handleAI(workspaceId: string, user: User, access: Access, questio
 }
 async function runAITool(name: string, args: any, workspaceId: string, user: User, access: Access) {
   const role = access.role;
+  if (name === "check_appointment_availability") {
+    const startText = clean(args.startAt, 80), endText = clean(args.endAt, 80);
+    const start = new Date(startText), end = new Date(endText);
+    if (!startText || !endText || !Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || end <= start) return { ok: false, error: "A valid start and end time are required." };
+    const assignedTo = clean(args.assignedTo, 120);
+    const appointments = await listRecords(workspaceId, "appointments");
+    const conflicts = appointments.filter(item => {
+      if (["Cancelled", "Completed"].includes(String(item.status || ""))) return false;
+      if (assignedTo && clean(item.assignedTo, 120) && clean(item.assignedTo, 120) !== assignedTo) return false;
+      const a = new Date(String(item.startAt || "")).getTime(), b = new Date(String(item.endAt || "")).getTime();
+      return Number.isFinite(a) && Number.isFinite(b) && start.getTime() < b && end.getTime() > a;
+    });
+    return { ok: true, available: conflicts.length === 0, conflicts: conflicts.map(item => ({ id: item.id, name: item.name, startAt: item.startAt, endAt: item.endAt, assignedTo: item.assignedTo })) };
+  }
+  if (name === "create_appointment") {
+    if (!roleCanWrite(role, "appointments")) return { ok: false, error: "Your role cannot create appointments." };
+    const title = clean(args.name, 180), startText = clean(args.startAt, 80), endText = clean(args.endAt, 80);
+    const start = new Date(startText), end = new Date(endText);
+    if (!title || !startText || !endText || !Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || end <= start) return { ok: false, error: "A name and valid start/end times are required." };
+    const assignedTo = clean(args.assignedTo, 120);
+    const existing = await listRecords(workspaceId, "appointments");
+    const conflict = existing.find(item => {
+      if (["Cancelled", "Completed"].includes(String(item.status || ""))) return false;
+      if (assignedTo && clean(item.assignedTo, 120) && clean(item.assignedTo, 120) !== assignedTo) return false;
+      const a = new Date(String(item.startAt || "")).getTime(), b = new Date(String(item.endAt || "")).getTime();
+      return Number.isFinite(a) && Number.isFinite(b) && start.getTime() < b && end.getTime() > a;
+    });
+    if (conflict) return { ok: false, error: "That time conflicts with an existing appointment. Offer another available time." };
+    const record = await addRecord(workspaceId, "appointments", { name: title, title, client: clean(args.client, 180), email: clean(args.email, 180), phone: clean(args.phone, 50), service: clean(args.service, 180), startAt: start.toISOString(), endAt: end.toISOString(), assignedTo, location: clean(args.location, 500), description: clean(args.description, 2000), status: "Confirmed" }, user.id);
+    await audit(workspaceId, user.id, "ai_agent", "appointment_created", "appointments", record.id, "Booked appointment " + title);
+    return { ok: true, action: "appointment_created", appointmentId: record.id, name: title, startAt: record.startAt, endAt: record.endAt, assignedTo, status: "Confirmed" };
+  }
   if (name === "draft_customer_message") {
     const type = clean(args.recordType, 20), id = clean(args.recordId, 100), channel = clean(args.channel, 20), body = clean(args.body, 4000);
     if (!["leads", "customers"].includes(type) || !id || !body || !["email", "whatsapp"].includes(channel)) return { ok: false, error: "A valid lead/customer, channel and message body are required." };
