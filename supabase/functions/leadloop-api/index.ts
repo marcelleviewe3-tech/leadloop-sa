@@ -142,7 +142,7 @@ async function runAITool(name: string, args: any, workspaceId: string, user: Use
     if (conflict) return { ok: false, error: "That time conflicts with an existing appointment. Offer another available time." };
     const record = await addRecord(workspaceId, "appointments", { name: title, title, client: clean(args.client, 180), email: clean(args.email, 180), phone: clean(args.phone, 50), service: clean(args.service, 180), startAt: start.toISOString(), endAt: end.toISOString(), assignedTo, location: clean(args.location, 500), description: clean(args.description, 2000), status: "Confirmed" }, user.id);
     await audit(workspaceId, user.id, "ai_agent", "appointment_created", "appointments", record.id, "Booked appointment " + title);
-    return { ok: true, action: "appointment_created", appointmentId: record.id, name: title, startAt: record.startAt, endAt: record.endAt, assignedTo, status: "Confirmed" };
+    return { ok: true, action: "appointment_created", appointmentId: record.id, name: title, startAt: start.toISOString(), endAt: end.toISOString(), assignedTo, status: "Confirmed" };
   }
   if (name === "draft_customer_message") {
     const type = clean(args.recordType, 20), id = clean(args.recordId, 100), channel = clean(args.channel, 20), body = clean(args.body, 4000);
