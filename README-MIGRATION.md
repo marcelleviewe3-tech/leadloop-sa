@@ -22,7 +22,7 @@ This branch is an isolated migration copy. The original `main` branch and the li
 
 ## Supabase setup (do this before deploying this branch)
 
-1. In the Supabase project, open **SQL Editor** and run `supabase/schema.sql` from this branch.
+1. The Supabase GitHub integration expects migrations under `supabase/migrations/`. This branch includes `supabase/migrations/20261112110000_leadloop_standalone.sql` for the preview branch. For a separate fresh staging project without GitHub preview, open **SQL Editor** and run `supabase/schema.sql` once. Do not run both against the same database.
 2. In **Project Settings → API**, copy the Project URL and anon/public key. Put them in the frontend host as `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
 3. In **Authentication → URL Configuration**, add the deployed site URL to the allowed redirect URLs. Enable email sign-in / magic links.
 4. Deploy `supabase/functions/leadloop-api/index.ts` as the `leadloop-api` Edge Function.
