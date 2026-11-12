@@ -22,13 +22,15 @@
 - [x] Add Edge Function config with JWT verification disabled at the gateway and bearer-token validation inside the handler, so public enquiry links work without login.
 - [x] Remove AppDeploy-specific backend source from this migration branch; `main` retains the original rollback source.
 - [x] Remove AppDeploy-specific Vite build environment dependencies.
-- [ ] Re-enable Supabase per-PR preview branches in Project Settings → Integrations (currently disabled by the project).
-- [ ] Apply SQL to a staging Supabase project.
-- [ ] Configure Auth email redirect URLs and frontend environment variables.
-- [ ] Deploy the Edge Function and set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `AI_PROVIDER_API_KEY` as server-side secrets.
-- [ ] Run `npm run typecheck`, `npm run build`, and `tests/supabase-smoke-test.md` against staging.
+- [x] Apply the database foundation and hardening migrations to the fresh Supabase test project.
+- [x] Deploy the `leadloop-api` Edge Function; Supabase supplies its built-in `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` runtime variables.
+- [x] Configure Cloudflare Pages for the migration branch, Supabase public frontend variables, automatic deployments, and TypeScript checks before each build.
+- [x] Run frontend typecheck/build and Deno Edge Function check on the migration implementation.
+- [ ] Set Supabase Auth Site URL to `https://leadloop-sa.pages.dev` and allow `https://leadloop-sa.pages.dev/**` in Redirect URLs.
+- [ ] Complete the manual Supabase smoke tests in `tests/supabase-smoke-test.md`.
+- [ ] Add `AI_PROVIDER_API_KEY` as an Edge Function secret only if enabling the AI assistant for testing.
 - [ ] Verify data migration/import strategy for any real AppDeploy customer records; no customer data is copied automatically by this code.
 - [ ] Obtain owner approval for a deliberate production cutover and rollback plan.
 
 ## Important
-This branch is a migration implementation, not a live cutover. It cannot authenticate or persist data until the SQL is applied and the Supabase project secrets and Edge Function are configured. The AI assistant returns a clear configuration error until `AI_PROVIDER_API_KEY` is set. WhatsApp remains status-only; no Meta messaging or delivery is claimed.
+This branch is deployed as a test environment, not a live production cutover. The Auth redirect allow-list still needs the one-time dashboard update above. The AI assistant returns a clear configuration error until `AI_PROVIDER_API_KEY` is set. WhatsApp remains status-only; no Meta messaging or delivery is claimed.

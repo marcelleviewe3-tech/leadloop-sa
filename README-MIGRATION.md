@@ -1,5 +1,28 @@
 # LeadLoop SA standalone Supabase migration
 
+## Current test deployment
+- Test site: https://leadloop-sa.pages.dev
+- Frontend host: Cloudflare Pages, connected to `marcelleviewe3-tech/leadloop-sa` on `migration/standalone-backend`.
+- Build command: `npm run typecheck && npm run build`; output directory: `dist`.
+- Supabase project: `vaycxiafwtcjlrylctpj`; Edge Function: `leadloop-api`.
+- The AppDeploy production deployment and GitHub `main` branch remain untouched. Do not merge the migration PR or cut over until smoke tests and owner approval are complete.
+
+### One-time Auth setup before the first sign-in
+Open [Supabase Auth URL Configuration](https://supabase.com/dashboard/project/vaycxiafwtcjlrylctpj/auth/url-configuration):
+1. Set **Site URL** to `https://leadloop-sa.pages.dev`.
+2. Add `https://leadloop-sa.pages.dev/**` to **Redirect URLs** and save.
+3. In **Authentication → Sign In / Providers → Email**, confirm email sign-in and new-user sign-up are enabled.
+
+For initial testing, use an email address that belongs to the Supabase organization's team. Supabase's built-in email sender only sends to team-member addresses and has a low hourly limit. Sending to arbitrary customers later requires custom SMTP.
+
+### Current feature boundaries
+- Lead capture includes phone, company, source and an explicit contact-consent field.
+- The unified AI assistant requires `AI_PROVIDER_API_KEY` as a Supabase Edge Function secret. It is not configured yet, so AI requests will return a clear configuration error until a key is added.
+- WhatsApp is status-only. Meta onboarding, webhooks and message delivery are not implemented.
+- Email drafts open in the user's email app for manual review and sending; LeadLoop does not send them automatically.
+- Billing/subscriptions and automated missed-call recovery are not active.
+
+
 This branch is an isolated migration copy. The original `main` branch and the live AppDeploy deployment are intentionally untouched.
 
 ## Architecture
