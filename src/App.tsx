@@ -124,6 +124,16 @@ function monthDates(value: Date) {
   });
 }
 
+function weekDates(value: Date) {
+  const start = new Date(value.getFullYear(), value.getMonth(), value.getDate());
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+  return Array.from({ length: 7 }, (_, index) => {
+    const day = new Date(start);
+    day.setDate(start.getDate() + index);
+    return day;
+  });
+}
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
@@ -344,12 +354,17 @@ export default function App() {
         amount: form.amount ? Number(form.amount) : undefined,
         consentToContact: form.consentToContact === 'true',
       };
-      const result = await api.post(
-        '/api/workspaces/' + workspace.id + '/' + resource,
-        payload
-      );
-      setRecords(old => [result.data.item, ...old]);
+      const endpoint = '/api/workspaces/' + workspace.id + '/' + resource;
+      const result = section === 'Calendar' && editingAppointment
+        ? await api.put(endpoint + '/' + editingAppointment.id, payload)
+        : await api.post(endpoint, payload);
+      if (section === 'Calendar' && editingAppointment) {
+        setRecords(old => old.map(item => item.id === editingAppointment.id ? result.data.item : item));
+      } else {
+        setRecords(old => [result.data.item, ...old]);
+      }
       setForm({});
+      setEditingAppointment(null);
       setShowCreate(false);
       setNotice(
         section === 'Leads'
@@ -489,6 +504,7 @@ export default function App() {
   }
 
   const calendarDays = monthDates(calendarCursor);
+  const calendarWeek = weekDates(calendarCursor);
   const selectedDayAppointments = records
     .filter(item => item.startAt && new Date(String(item.startAt)).toDateString() === selectedCalendarDate.toDateString())
     .sort((a, b) => new Date(String(a.startAt)).getTime() - new Date(String(b.startAt)).getTime());
