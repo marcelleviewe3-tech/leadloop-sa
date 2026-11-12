@@ -69,6 +69,8 @@ create table if not exists public.workspace_activity (
 );
 create index if not exists workspace_activity_recent_idx
   on public.workspace_activity (workspace_id, created_at desc);
+create index if not exists workspace_members_user_id_idx
+  on public.workspace_members (user_id, workspace_id);
 
 create table if not exists public.workspace_invites (
   id uuid primary key default gen_random_uuid(),
@@ -141,44 +143,54 @@ alter table public.workspace_activity enable row level security;
 alter table public.workspace_invites enable row level security;
 alter table public.public_enquiry_tokens enable row level security;
 
+drop policy if exists "members can view their workspaces" on public.workspaces;
 create policy "members can view their workspaces"
   on public.workspaces for select to authenticated
   using (public.is_workspace_member(id));
 
+drop policy if exists "authenticated users can create workspaces" on public.workspaces;
 create policy "authenticated users can create workspaces"
   on public.workspaces for insert to authenticated
   with check (created_by = auth.uid());
 
+drop policy if exists "owners and admins can update workspace profile" on public.workspaces;
 create policy "owners and admins can update workspace profile"
   on public.workspaces for update to authenticated
   using (public.current_workspace_role(id) in ('owner','admin'))
   with check (public.current_workspace_role(id) in ('owner','admin'));
 
+drop policy if exists "workspace members can view membership" on public.workspace_members;
 create policy "workspace members can view membership"
   on public.workspace_members for select to authenticated
   using (public.is_workspace_member(workspace_id));
 
+drop policy if exists "workspace members can view records" on public.workspace_records;
 create policy "workspace members can view records"
   on public.workspace_records for select to authenticated
   using (public.is_workspace_member(workspace_id));
 
+drop policy if exists "per-role resource create access" on public.workspace_records;
 create policy "per-role resource create access"
   on public.workspace_records for insert to authenticated
-  with check (public.can_write_resource(workspace_id, resource));
+  with check (public.can_write_resource(workspace_id, resource) and (created_by is null or created_by = auth.uid()));
 
+drop policy if exists "per-role resource update access" on public.workspace_records;
 create policy "per-role resource update access"
   on public.workspace_records for update to authenticated
   using (public.can_write_resource(workspace_id, resource))
   with check (public.can_write_resource(workspace_id, resource));
 
+drop policy if exists "workspace members can view messages" on public.workspace_messages;
 create policy "workspace members can view messages"
   on public.workspace_messages for select to authenticated
   using (public.is_workspace_member(workspace_id));
 
+drop policy if exists "workspace members can view activity" on public.workspace_activity;
 create policy "workspace members can view activity"
   on public.workspace_activity for select to authenticated
   using (public.is_workspace_member(workspace_id));
 
+drop policy if exists "owners and admins can view invitations" on public.workspace_invites;
 create policy "owners and admins can view invitations"
   on public.workspace_invites for select to authenticated
   using (public.current_workspace_role(workspace_id) in ('owner','admin'));
@@ -195,6 +207,9 @@ alter table public.workspaces add column if not exists settings jsonb not null d
 alter table public.workspace_messages add column if not exists consent_to_contact boolean not null default false;
 alter table public.workspace_messages add column if not exists data jsonb not null default '{}'::jsonb;
 alter table public.public_enquiry_tokens add column if not exists token_value text;
+
+create index if not exists public_enquiry_tokens_workspace_active_idx
+  on public.public_enquiry_tokens (workspace_id) where revoked_at is null;
 
 -- The token value is readable only by the server-side service-role client.
 -- RLS is enabled and deliberately has no authenticated or anonymous SELECT policy.
