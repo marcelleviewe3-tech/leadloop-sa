@@ -220,7 +220,7 @@ Deno.serve(async req => {
         const all = await Promise.all(names.map(n => listRecords(workspaceId, n)));
         const [leads, customers, projects, tasks, invoices] = all;
         const sum = (rows: any[]) => rows.reduce((v, r) => v + Number(r.amount || 0), 0);
-        return json({ metrics: { leads: leads.length, customers: customers.length, projects: projects.filter(r => r.status !== "Done").length, tasks: tasks.filter(r => r.status !== "Done").length, revenue: sum(invoices.filter(r => r.status === "Paid")), outstanding: sum(invoices.filter(r => !["Paid", "Cancelled"].includes(r.status))) } });
+        return json({ metrics: { leads: leads.length, customers: customers.length, projects: projects.filter(r => !["Done", "Cancelled"].includes(r.status)).length, tasks: tasks.filter(r => !["Done", "Cancelled"].includes(r.status)).length, revenue: sum(invoices.filter(r => r.status === "Paid")), outstanding: sum(invoices.filter(r => !["Paid", "Cancelled"].includes(r.status))) } });
       }
       if (tail === "members" && method === "GET") {
         const { data, error } = await admin.from("workspace_members").select("user_id,email,role,created_at").eq("workspace_id", workspaceId);

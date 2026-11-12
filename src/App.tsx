@@ -108,6 +108,11 @@ function dateLabel(value?: string) {
   }).format(new Date(value));
 }
 
+function localDateTimeInput(value: Date) {
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`;
+}
+
 function monthDates(value: Date) {
   const first = new Date(value.getFullYear(), value.getMonth(), 1);
   const start = new Date(first);
@@ -1028,7 +1033,7 @@ export default function App() {
                   ['Total leads', overview.leads || 0, Target],
                   ['Customers', overview.customers || 0, Users],
                   ['Open projects', overview.projects || 0, BriefcaseBusiness],
-                  ['Tasks due', overview.tasks || 0, CalendarDays],
+                  ['Open tasks', overview.tasks || 0, CalendarDays],
                   ['Revenue recorded', money(overview.revenue || 0), Wallet],
                   ['Outstanding', money(overview.outstanding || 0), CreditCard],
                 ] as [string, string | number, LucideIcon][]).map(([label, value, Icon]) => (
@@ -1181,7 +1186,7 @@ export default function App() {
                         <option>Requested</option><option>Confirmed</option><option>In progress</option><option>Completed</option><option>Cancelled</option>
                       </select>
                     </div>
-                  )) : <div className="empty"><div className="empty-icon"><CalendarDays /></div><b>No appointments on this day</b><span>Select another date or create a new appointment.</span><button className="secondary" onClick={() => { setForm({ startAt: new Date(selectedCalendarDate.getFullYear(), selectedCalendarDate.getMonth(), selectedCalendarDate.getDate(), 9, 0).toISOString().slice(0, 16), endAt: new Date(selectedCalendarDate.getFullYear(), selectedCalendarDate.getMonth(), selectedCalendarDate.getDate(), 10, 0).toISOString().slice(0, 16) }); setShowCreate(true); }}>Add appointment for this day</button></div>}
+                  )) : <div className="empty"><div className="empty-icon"><CalendarDays /></div><b>No appointments on this day</b><span>Select another date or create a new appointment.</span><button className="secondary" onClick={() => { setForm({ startAt: localDateTimeInput(new Date(selectedCalendarDate.getFullYear(), selectedCalendarDate.getMonth(), selectedCalendarDate.getDate(), 9, 0)), endAt: localDateTimeInput(new Date(selectedCalendarDate.getFullYear(), selectedCalendarDate.getMonth(), selectedCalendarDate.getDate(), 10, 0)) }); setShowCreate(true); }}>Add appointment for this day</button></div>}
                 </div>
               </div>
             </>
