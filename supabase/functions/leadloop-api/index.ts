@@ -38,7 +38,7 @@ async function accessFor(user: User, workspaceId: string): Promise<Access> {
   return { workspace, role: membership.role };
 }
 const profileOut = (w: any, role: string) => ({ id: w.id, name: w.name, industry: w.industry, currency: w.currency || "ZAR", role, trialStartedAt: w.trial_started_at, trialEndsAt: w.trial_ends_at });
-async function listRecords(workspaceId: string, resource: string) {
+async function listRecords(workspaceId: string, resource: string): Promise<Array<Record<string, any>>> {
   const { data, error } = await admin.from("workspace_records").select("id,data,created_by,created_at,updated_at").eq("workspace_id", workspaceId).eq("resource", resource).order("created_at", { ascending: false }).limit(500);
   if (error) throw error;
   return (data || []).map(row => ({ ...obj(row.data), id: row.id, workspaceId, createdBy: row.created_by, createdAt: row.created_at, updatedAt: row.updated_at }));
