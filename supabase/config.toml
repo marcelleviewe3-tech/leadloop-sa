@@ -1,0 +1,4 @@
+project_id = "vaycxiafwtcjlrylctpj"
+
+[functions.leadloop-api]
+verify_jwt = false
