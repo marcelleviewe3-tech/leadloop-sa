@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { auth, api, invitesClient } from './lib/platform';
+import { LeadLoopAgent } from './lib/leadloop-agent';
 import {
   Activity,
   ArrowUpRight,
@@ -156,6 +157,10 @@ export default function App() {
   const [aiQuestion, setAiQuestion] = useState('');
   const [aiAnswer, setAiAnswer] = useState('');
   const [aiBusy, setAiBusy] = useState(false);
+  const [agentQuestion, setAgentQuestion] = useState('');
+  const [agentBusy, setAgentBusy] = useState(false);
+  const [agentMessages, setAgentMessages] = useState<Array<{ role: 'user' | 'agent'; text: string }>>([]);
+  const agent = useMemo(() => new LeadLoopAgent({ businessName: workspace?.name || 'LeadLoop SA' }), [workspace?.name]);
   const [form, setForm] = useState<Record<string, string>>({});
   const [workspaceName, setWorkspaceName] = useState('');
   const [industry, setIndustry] = useState('Professional services');
@@ -474,6 +479,31 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function askLeadLoopAgent() {
+    if (!workspace || !agentQuestion.trim() || agentBusy) return;
+    const question = agentQuestion.trim();
+    setAgentQuestion('');
+    setAgentMessages(old => [...old, { role: 'user', text: question }]);
+    setAgentBusy(true);
+    try {
+      const names = ['leads', 'customers', 'invoices', 'tasks', 'appointments', 'expenses'];
+      const pairs = await Promise.all(names.map(async name => {
+        const response = await api.get('/api/workspaces/' + workspace.id + '/' + name);
+        return [name, response.data.items || []] as const;
+      }));
+      const context = Object.fromEntries(pairs);
+      const result = await agent.chat(question, context);
+      let reply = result.reply;
+      if (result.needsApproval && result.data) {
+        const saved = await api.post('/api/workspaces/' + workspace.id + '/messages/drafts', result.data);
+        reply += '\\n\\n' + (saved.data.message || 'Draft saved in Messages for owner/admin approval. It has NOT been sent.');
+      }
+      setAgentMessages(old => [...old, { role: 'agent', text: reply }]);
+    } catch (error) {
+      setAgentMessages(old => [...old, { role: 'agent', text: error instanceof Error ? error.message : 'The LeadLoop agent could not complete that request.' }]);
+    } finally { setAgentBusy(false); }
   }
 
   async function askAI() {
@@ -1108,6 +1138,21 @@ export default function App() {
                   </button>
                 </div>
               </div>
+              <section className="leadloop-agent-panel">
+                <div className="leadloop-agent-heading">
+                  <div className="ai-orb small"><Sparkles /></div>
+                  <div><span className="eyebrow">RULE-BASED BUSINESS AGENT</span><h3>LeadLoop agent chat</h3><p>Uses your actual workspace records. Customer messages are never sent automatically.</p></div>
+                </div>
+                <div className="leadloop-agent-messages" aria-live="polite">
+                  {agentMessages.length === 0 && <div className="agent-bubble agent-reply">Hi. I can score leads, check follow-ups, review finances and appointments, find duplicates, and prepare consent-checked email drafts for approval.</div>}
+                  {agentMessages.map((item, index) => <div className={item.role === 'user' ? 'agent-bubble agent-user' : 'agent-bubble agent-reply'} key={index}>{item.text}</div>)}
+                  {agentBusy && <div className="agent-bubble agent-reply">Checking your workspace records…</div>}
+                </div>
+                <form className="leadloop-agent-compose" onSubmit={event => { event.preventDefault(); askLeadLoopAgent(); }}>
+                  <textarea rows={2} value={agentQuestion} onChange={event => setAgentQuestion(event.target.value)} placeholder="Ask your LeadLoop agent…" />
+                  <button className="primary" type="submit" disabled={agentBusy || !agentQuestion.trim()}>{agentBusy ? 'Working…' : 'Send'} <Send size={15} /></button>
+                </form>
+              </section>
             </>
           )}
           {section === 'Analytics' && (

@@ -1421,3 +1421,16 @@ td small {
   .calendar-week-grid .calendar-day { min-height: 140px; }
   .calendar-view-switch { margin-top: 0; }
 }
+
+.leadloop-agent-panel{margin-top:22px;padding:22px;border:1px solid #263448;border-radius:18px;background:linear-gradient(145deg,#121d2b,#101722);min-width:0}
+.leadloop-agent-heading{display:flex;align-items:center;gap:14px;margin-bottom:18px}
+.leadloop-agent-heading h3{margin:4px 0;font-size:19px}
+.leadloop-agent-heading p{margin:0;color:#9aa9bc;font-size:13px;line-height:1.5}
+.leadloop-agent-messages{display:flex;flex-direction:column;gap:10px;max-height:340px;overflow-y:auto;padding:4px 2px 14px}
+.agent-bubble{max-width:min(88%,680px);white-space:pre-wrap;overflow-wrap:anywhere;padding:12px 14px;border-radius:14px;font-size:14px;line-height:1.55}
+.agent-reply{align-self:flex-start;background:#1b2939;color:#e8eef7;border:1px solid #2a3b50}
+.agent-user{align-self:flex-end;background:#244b73;color:#fff}
+.leadloop-agent-compose{display:flex;align-items:flex-end;gap:10px}
+.leadloop-agent-compose textarea{flex:1;min-width:0;resize:vertical;min-height:48px;padding:12px;border:1px solid #304158;border-radius:12px;background:#0c1420;color:#eef3fa}
+.leadloop-agent-compose button{white-space:nowrap;min-height:46px}
+@media(max-width:600px){.leadloop-agent-panel{padding:15px;margin-top:16px}.leadloop-agent-compose{flex-direction:column;align-items:stretch}.leadloop-agent-compose button{width:100%;justify-content:center}.agent-bubble{max-width:96%}}

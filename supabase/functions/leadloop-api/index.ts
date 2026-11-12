@@ -299,6 +299,20 @@ Deno.serve(async req => {
         return json({ channel: "whatsapp", connected, status: connected ? "connected" : "not_connected", phoneDisplay: settings.whatsappPhoneDisplay || null, connectedAt: settings.whatsappConnectedAt || null, canStartEmbeddedSignup: false, message: connected ? "A WhatsApp account is recorded. Live handling still requires the approved Meta webhook and messaging services." : "Meta setup is not complete. The Meta developer app, permissions and webhook verification must be completed before businesses can connect their own accounts." });
       }
       if (tail === "messages" && method === "GET") return json({ items: await messageList(workspaceId) });
+      if (tail === "messages/drafts" && method === "POST") {
+        const b = obj(await bodyOf(req)), recordId = clean(b.recordId, 100);
+        if (clean(b.recordType, 20) !== "leads" || !recordId || clean(b.channel, 20) !== "email") throw new HttpError("Only an email draft for an existing lead can be prepared by this agent.");
+        const { data: leadRow, error: leadError } = await admin.from("workspace_records").select("data").eq("workspace_id", workspaceId).eq("resource", "leads").eq("id", recordId).maybeSingle();
+        if (leadError) throw leadError;
+        if (!leadRow) throw new HttpError("The selected lead no longer exists.", 404);
+        const lead = obj(leadRow.data), recipient = clean(lead.email, 180), body = clean(b.body, 4000);
+        if (!recipient || !body) throw new HttpError("A valid lead email address and message body are required.");
+        if (lead.consentToContact !== true) throw new HttpError("Recorded contact consent is required. No draft was saved.", 409);
+        const { data: inserted, error: insertError } = await admin.from("workspace_messages").insert({ workspace_id: workspaceId, channel: "email", recipient, subject: clean(b.subject, 180), body, status: "Pending approval", approval_status: "Pending", delivery_status: "Not sent", consent_to_contact: true, data: { recordType: "leads", recordId, contactName: clean(lead.name || lead.client || lead.title, 180), consentToContact: true, source: "rule_based_leadloop_agent" }, created_by: user.id }).select("id").single();
+        if (insertError) throw insertError;
+        await audit(workspaceId, user.id, "rule_based_agent", "message_drafted", "messages", inserted.id, "Prepared an email draft for approval. Not sent.");
+        return json({ created: true, messageId: inserted.id, status: "Pending approval", sent: false, message: "Draft saved in Messages for owner/admin approval. It has NOT been sent." }, 201);
+      }
       const messageMatch = tail.match(/^messages\/([^/]+)\/(approve|mark-sent)$/);
       if (messageMatch && method === "POST") {
         if (!canManage(access.role)) throw new HttpError("Only workspace owners and admins can manage customer messages.", 403);
