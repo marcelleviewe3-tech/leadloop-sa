@@ -119,6 +119,7 @@ async function runAITool(name: string, args: any, workspaceId: string, user: Use
     const contact = obj(row.data), recipient = channel === "email" ? clean(contact.email, 180) : clean(contact.phone, 50);
     if (!recipient) return { ok: false, error: "The selected contact has no recipient address for this channel." };
     const consent = contact.consentToContact === true;
+    if (!consent) return { ok: false, error: "Recorded contact consent is required before drafting a customer message." };
     const data = { recordType: type, recordId: id, contactName: clean(contact.name || contact.client || contact.title, 180), consentToContact: consent };
     const { data: inserted, error: insertError } = await admin.from("workspace_messages").insert({ workspace_id: workspaceId, channel, recipient, subject: channel === "email" ? clean(args.subject, 180) : "", body, status: "Pending approval", approval_status: "Pending", delivery_status: "Not sent", consent_to_contact: consent, data, created_by: user.id }).select("id").single();
     if (insertError) throw insertError;
