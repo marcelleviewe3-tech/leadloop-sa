@@ -1,0 +1,21 @@
+{
+  "id": "/",
+  "name": "LeadLoop SA",
+  "short_name": "LeadLoop",
+  "description": "More enquiries. More jobs. Less missed opportunities.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "portrait-primary",
+  "background_color": "#0b1019",
+  "theme_color": "#0b1019",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
