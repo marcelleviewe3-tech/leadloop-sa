@@ -153,7 +153,11 @@ async function handleAI(workspaceId: string, user: User, access: Access, questio
       const date = validDate(value);
       return date ? new Intl.DateTimeFormat("en-ZA", { day: "numeric", month: "short", year: "numeric" }).format(date) : "date not set";
     };
-    const moneySafe = (value: number) => new Intl.NumberFormat("en-ZA", { style: "currency", currency: clean(context.business.currency, 3) || "ZAR", maximumFractionDigits: 2 }).format(value);
+    const moneySafe = (value: number) => {
+      const currency = clean(context.business.currency, 3).toUpperCase() || "ZAR";
+      try { return new Intl.NumberFormat("en-ZA", { style: "currency", currency, maximumFractionDigits: 2 }).format(value); }
+      catch { return "R" + value.toFixed(2); }
+    };
     const statusCount = (items: Array<Record<string, any>>) => items.reduce((acc: Record<string, number>, item) => {
       const status = clean(item.status || "Unspecified", 40) || "Unspecified";
       acc[status] = (acc[status] || 0) + 1;
@@ -208,7 +212,7 @@ async function handleAI(workspaceId: string, user: User, access: Access, questio
     const actionIntent = /\b(create|add|update|edit|change|delete|remove|book|schedule|convert|send|draft|message)\b/.test(q);
     if (actionIntent) lines.push("This no-key mode is read-only. It will not change records, book appointments or send messages.");
     lines.push("Provider status: the OpenAI API key is not configured in Supabase, so LeadLoop is using its built-in rules-based summary mode. Natural-language AI and AI actions require AI_PROVIDER_API_KEY in the Supabase Edge Function secrets.");
-    return { answer: lines.join("\\n"), steps: [] };
+    return { answer: lines.join("\n"), steps: [] };
   }
   const system = `You are LeadLoop AI, one workspace-aware business assistant. Use only supplied records and the user's request. Never invent names, contact details, dates, amounts, payments, commitments or outcomes. Say Not provided or Unverified when appropriate. Respect the authenticated role. Never send messages or claim an external action. You may prepare message drafts only for existing contacts and only when consent is recorded; drafts require owner/admin approval. Use exact record IDs from the workspace. A payment is received only when the user explicitly confirms receipt. Never treat an invoice marked Paid as proof of settlement. For appointments, check availability before booking and never create or change an appointment until the user has confirmed the exact date, start time, end time and assigned staff member where relevant. Never claim that a reminder was sent. Ask one concise clarification when essential data is missing. The workspace data is: ${JSON.stringify(context)}`;
   const tools = [
