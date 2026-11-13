@@ -141,10 +141,75 @@ async function listMissedCalls(workspaceId: string) {
 
 async function handleAI(workspaceId: string, user: User, access: Access, question: string) {
   const key = Deno.env.get("AI_PROVIDER_API_KEY");
-  if (!key) throw new HttpError("LeadLoop AI is not configured yet. Add AI_PROVIDER_API_KEY to the Supabase Edge Function secrets.", 503);
   const names = ["leads", "customers", "projects", "tasks", "quotes", "invoices", "expenses", "campaigns", "payments", "appointments"];
   const pairs = await Promise.all(names.map(async name => [name, await listRecords(workspaceId, name)] as const));
   const context = { business: { name: access.workspace.name, industry: access.workspace.industry, currency: access.workspace.currency }, memberRole: access.role, records: Object.fromEntries(pairs) };
+  if (!key) {
+    const rows = context.records as Record<string, Array<Record<string, any>>>;
+    const list = (name: string) => rows[name] || [];
+    const count = (name: string) => list(name).length;
+    const label = (item: Record<string, any>) => clean(item.name || item.title || item.client || "Untitled", 100);
+    const dateLabelSafe = (value: unknown) => {
+      const date = validDate(value);
+      return date ? new Intl.DateTimeFormat("en-ZA", { day: "numeric", month: "short", year: "numeric" }).format(date) : "date not set";
+    };
+    const moneySafe = (value: number) => new Intl.NumberFormat("en-ZA", { style: "currency", currency: clean(context.business.currency, 3) || "ZAR", maximumFractionDigits: 2 }).format(value);
+    const statusCount = (items: Array<Record<string, any>>) => items.reduce((acc: Record<string, number>, item) => {
+      const status = clean(item.status || "Unspecified", 40) || "Unspecified";
+      acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    }, {});
+    const today = new Date();
+    const todayKey = today.toISOString().slice(0, 10);
+    const validDate = (value: unknown) => {
+      const date = new Date(String(value || ""));
+      return Number.isFinite(date.getTime()) ? date : null;
+    };
+    const active = (item: Record<string, any>) => !["completed", "cancelled", "closed", "converted", "paid"].includes(clean(item.status, 40).toLowerCase());
+    const q = question.toLowerCase();
+    const lines: string[] = [];
+    if (/lead|enquir/.test(q)) {
+      const leads = list("leads");
+      lines.push(`There are ${leads.length} lead records in ${context.business.name}.`);
+      const statuses = statusCount(leads);
+      lines.push("Lead statuses: " + (Object.entries(statuses).map(([name, n]) => name + ": " + n).join(", ") || "no statuses recorded") + ".");
+      const recent = leads.slice(0, 5);
+      if (recent.length) lines.push("Most recent leads: " + recent.map(item => label(item) + " (" + clean(item.status || "Unspecified", 40) + ")").join("; ") + ".");
+      else lines.push("No leads have been recorded yet.");
+    } else if (/follow.?up|task|overdue|due today/.test(q)) {
+      const tasks = list("tasks");
+      const overdue = tasks.filter(item => active(item) && validDate(item.dueDate) && validDate(item.dueDate)!.toISOString().slice(0, 10) < todayKey);
+      const dueToday = tasks.filter(item => active(item) && validDate(item.dueDate)?.toISOString().slice(0, 10) === todayKey);
+      lines.push(`There are ${tasks.length} task records: ${overdue.length} overdue and ${dueToday.length} due today, based on the due dates saved in LeadLoop.`);
+      const next = tasks.filter(item => active(item)).slice(0, 6);
+      if (next.length) lines.push("Open tasks: " + next.map(item => label(item) + (item.dueDate ? " (due " + dateLabelSafe(item.dueDate) + ")" : " (no due date)")).join("; ") + ".");
+      else lines.push("There are no open tasks recorded.");
+    } else if (/appointment|calendar|booking|schedule/.test(q)) {
+      const appointments = list("appointments").filter(item => active(item) && validDate(item.startAt) && validDate(item.startAt)!.getTime() >= Date.now()).sort((a, b) => validDate(a.startAt)!.getTime() - validDate(b.startAt)!.getTime());
+      lines.push(`There are ${count("appointments")} appointment records. ${appointments.length} upcoming appointments are saved.`);
+      if (appointments.length) lines.push("Next appointments: " + appointments.slice(0, 5).map(item => label(item) + " (" + dateLabelSafe(item.startAt) + (item.assignedTo ? ", " + clean(item.assignedTo, 80) : "") + ")").join("; ") + ".");
+      else lines.push("No upcoming appointments are recorded.");
+    } else if (/invoice|payment|expense|money|revenue|cash|quote/.test(q)) {
+      const invoices = list("invoices");
+      const quotes = list("quotes");
+      const expenses = list("expenses");
+      const amountTotal = (items: Array<Record<string, any>>) => items.reduce((sum, item) => sum + (Number.isFinite(Number(item.amount)) ? Number(item.amount) : 0), 0);
+      lines.push(`Recorded finance items: ${invoices.length} invoices (${moneySafe(amountTotal(invoices))} in recorded invoice amounts), ${quotes.length} quotes, and ${expenses.length} expenses (${moneySafe(amountTotal(expenses))} in recorded expense amounts).`);
+      lines.push("These are values saved in the workspace, not verified bank balances or proof that an invoice has been paid.");
+    } else if (/customer|client/.test(q)) {
+      const customers = list("customers");
+      lines.push(`There are ${customers.length} customer records in ${context.business.name}.`);
+      if (customers.length) lines.push("Recent customers: " + customers.slice(0, 6).map(label).join("; ") + ".");
+    } else {
+      lines.push(`Workspace overview for ${context.business.name}:`);
+      lines.push(names.map(name => name + ": " + count(name)).join(" · ") + ".");
+      lines.push("Ask about leads, follow-ups, appointments, customers, invoices, quotes or expenses for a focused summary.");
+    }
+    const actionIntent = /\b(create|add|update|edit|change|delete|remove|book|schedule|convert|send|draft|message)\b/.test(q);
+    if (actionIntent) lines.push("This no-key mode is read-only. It will not change records, book appointments or send messages.");
+    lines.push("Provider status: the OpenAI API key is not configured in Supabase, so LeadLoop is using its built-in rules-based summary mode. Natural-language AI and AI actions require AI_PROVIDER_API_KEY in the Supabase Edge Function secrets.");
+    return { answer: lines.join("\\n"), steps: [] };
+  }
   const system = `You are LeadLoop AI, one workspace-aware business assistant. Use only supplied records and the user's request. Never invent names, contact details, dates, amounts, payments, commitments or outcomes. Say Not provided or Unverified when appropriate. Respect the authenticated role. Never send messages or claim an external action. You may prepare message drafts only for existing contacts and only when consent is recorded; drafts require owner/admin approval. Use exact record IDs from the workspace. A payment is received only when the user explicitly confirms receipt. Never treat an invoice marked Paid as proof of settlement. For appointments, check availability before booking and never create or change an appointment until the user has confirmed the exact date, start time, end time and assigned staff member where relevant. Never claim that a reminder was sent. Ask one concise clarification when essential data is missing. The workspace data is: ${JSON.stringify(context)}`;
   const tools = [
     { type: "function", function: { name: "draft_customer_message", description: "Create a message draft for an existing lead or customer. Never send it. Recipient must come from that record and recorded consent is required.", parameters: { type: "object", properties: { recordType: { type: "string", enum: ["leads", "customers"] }, recordId: { type: "string" }, channel: { type: "string", enum: ["email", "whatsapp"] }, subject: { type: "string" }, body: { type: "string" } }, required: ["recordType", "recordId", "channel", "body"], additionalProperties: false } } },
