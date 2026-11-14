@@ -18,6 +18,7 @@ import {
   MessageSquareText,
   Plus,
   Search,
+  RefreshCw,
   Send,
   Settings,
   Sparkles,
@@ -50,6 +51,7 @@ type Section =
   | 'Invoices'
   | 'Expenses'
   | 'Payments'
+  | 'Revenue Recovery'
   | 'Marketing'
   | 'Messages'
   | 'Analytics'
@@ -71,6 +73,7 @@ const sections: {
   { name: 'Invoices', icon: CreditCard, group: 'Money' },
   { name: 'Expenses', icon: Wallet, group: 'Money' },
   { name: 'Payments', icon: CreditCard, group: 'Money' },
+  { name: 'Revenue Recovery', icon: RefreshCw, group: 'Growth' },
   { name: 'Marketing', icon: MessageSquareText, group: 'Growth' },
   { name: 'Messages', icon: Send, group: 'Growth' },
   { name: 'Analytics', icon: ChartNoAxesCombined, group: 'Growth' },
@@ -131,6 +134,7 @@ export default function App() {
   const [selectedCalendarDate, setSelectedCalendarDate] = useState(() => new Date());
   const [records, setRecords] = useState<RecordItem[]>([]);
   const [overview, setOverview] = useState<Record<string, number>>({});
+  const [recoveryData, setRecoveryData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState('');
   const [showCreate, setShowCreate] = useState(false);
@@ -230,6 +234,11 @@ export default function App() {
           '/api/workspaces/' + workspace.id + '/overview'
         );
         setOverview(result.data.metrics || {});
+      }
+      if (section === 'Revenue Recovery') {
+        const result = await api.get('/api/workspaces/' + workspace.id + '/revenue-recovery');
+        setRecoveryData(result.data);
+        setRecords(result.data.followUps || []);
       }
       const resource = resourceMap[section];
       if (resource) {
@@ -347,6 +356,8 @@ export default function App() {
       const payload = {
         ...form,
         amount: form.amount ? Number(form.amount) : undefined,
+        nextFollowUpAt: form.nextFollowUpAt ? new Date(form.nextFollowUpAt).toISOString() : undefined,
+        consentToContact: form.consentToContact === 'true',
       };
       const result = await api.post(
         '/api/workspaces/' + workspace.id + '/' + resource,
@@ -373,6 +384,34 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function prepareRecoveryFollowUp(item: RecordItem) {
+    if (!workspace || item.consentToContact !== true || !item.email) { setNotice('A saved email address and recorded contact consent are required before preparing a follow-up.'); return; }
+    const contactName = String(item.name || item.client || 'there');
+    const service = String(item.serviceRequested || item.service || 'your enquiry');
+    const body = 'Hi ' + contactName + ',\n\nI am following up on your enquiry about ' + service + '. If you still need help, reply to this email and we will be happy to assist with the next steps.\n\nRegards,\n' + workspace.name;
+    try {
+      await api.post('/api/workspaces/' + workspace.id + '/messages/drafts', { recordType: 'leads', recordId: item.id, channel: 'email', subject: 'Following up on your enquiry', body });
+      setNotice('Follow-up draft saved in Messages. Review it and send it yourself when ready.');
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not prepare this follow-up.'); }
+  }
+
+  async function recordRecoveredSale(item: RecordItem) {
+    if (!workspace) return;
+    const entered = window.prompt('Enter the confirmed sale amount in South African rand (R):');
+    if (entered === null) return;
+    const amount = Number(entered.replace(/[,\sR]/g, ''));
+    if (!Number.isFinite(amount) || amount <= 0) { setNotice('Enter a valid recovered sale amount greater than R0.'); return; }
+    if (!window.confirm('Confirm that this lead became a paying customer and that R' + amount.toFixed(2) + ' is the agreed sale value?')) return;
+    try {
+      const result = await api.post('/api/workspaces/' + workspace.id + '/revenue-recovery/mark-recovered', { leadId: item.id, amount });
+      setNotice('Sale recorded. ' + (result.data.customerCreated ? 'A customer record was created. ' : '') + 'Recovered revenue has been updated.');
+      const refreshed = await api.get('/api/workspaces/' + workspace.id + '/revenue-recovery');
+      setRecoveryData(refreshed.data); setRecords(refreshed.data.followUps || []);
+      const overviewResult = await api.get('/api/workspaces/' + workspace.id + '/overview');
+      setOverview(overviewResult.data.metrics || {});
+    } catch (error) { setNotice(error instanceof Error ? error.message : 'Could not record this recovered sale.'); }
   }
 
   async function approveMessage(item: RecordItem) {
@@ -1165,6 +1204,30 @@ export default function App() {
               </div>
             </>
           )}
+          {section === 'Revenue Recovery' && (
+            <>
+              <div className="page-heading"><div><div className="eyebrow">TURN OPPORTUNITIES INTO SALES</div><h1>Revenue recovery</h1><p>Work the follow-up queue, move open quotes forward and record sales you have actually recovered.</p></div><button className="secondary" onClick={refreshSection}><Activity size={16} /> Refresh numbers</button></div>
+              <div className="recovery-metrics">
+                <div className="metric-card"><div className="metric-top"><span>Recovered revenue</span><Wallet size={17}/></div><strong>{money(recoveryData?.metrics?.recoveredRevenue || 0)}</strong><small>Manually confirmed sales only</small></div>
+                <div className="metric-card"><div className="metric-top"><span>Follow-ups due</span><Bell size={17}/></div><strong>{recoveryData?.metrics?.followUpsDue || 0}</strong><small>{recoveryData?.metrics?.overdueFollowUps || 0} overdue</small></div>
+                <div className="metric-card"><div className="metric-top"><span>Quotes awaiting decision</span><FileText size={17}/></div><strong>{recoveryData?.metrics?.openQuotes || 0}</strong><small>{money(recoveryData?.metrics?.quotePipelineValue || 0)} open quote value</small></div>
+                <div className="metric-card"><div className="metric-top"><span>Lead conversion rate</span><Target size={17}/></div><strong>{Number(recoveryData?.metrics?.leadConversionRate || 0).toFixed(1)}%</strong><small>Based on recorded lead statuses</small></div>
+              </div>
+              <div className="panel recovery-explainer"><div className="recovery-explainer-icon"><RefreshCw size={20}/></div><div><b>Recovery means measurable outcomes, not inflated dashboard numbers.</b><p>LeadLoop counts recovered revenue only after you record a confirmed sale. Open quotes and follow-ups are opportunities, not money already earned.</p></div></div>
+              <div className="panel table-panel recovery-table">
+                <div className="panel-head"><div><h3>Lead follow-up queue</h3><p>{recoveryData?.followUps?.length || 0} leads with a follow-up date that is due</p></div><Target size={18}/></div>
+                {recoveryData?.followUps?.length ? <div className="table-wrap"><table><thead><tr><th>Lead</th><th>Follow-up due</th><th>Contact</th><th>Lead value</th><th>Action</th></tr></thead><tbody>
+                  {recoveryData.followUps.map((item: RecordItem) => <tr key={item.id}><td><b>{String(item.name || item.client || 'Unnamed lead')}</b><small>{String(item.company || item.serviceRequested || 'Lead')}</small></td><td><span className={item.isOverdue ? 'recovery-overdue' : 'status-pill'}>{dateLabel(String(item.followUpAt || ''))}{item.isOverdue ? ' · Overdue' : ''}</span></td><td><b>{String(item.email || 'No email')}</b><small>{String(item.phone || 'No phone')}</small></td><td>{Number(item.amount || 0) > 0 ? money(item.amount) : 'Not recorded'}</td><td><div className="recovery-actions"><button className="secondary" onClick={() => prepareRecoveryFollowUp(item)} disabled={!item.email || item.consentToContact !== true}>Prepare email</button><button className="primary" onClick={() => recordRecoveredSale(item)}>Record sale</button></div></td></tr>)}
+                </tbody></table></div> : <div className="empty"><div className="empty-icon"><Check/></div><b>No dated follow-ups are due</b><span>Add a next follow-up date to a lead and LeadLoop will surface it here when it is due. Leads without a date are not falsely labelled overdue.</span></div>}
+              </div>
+              <div className="panel table-panel recovery-table">
+                <div className="panel-head"><div><h3>Quotes awaiting a decision</h3><p>Open quotes that may need a customer follow-up</p></div><FileText size={18}/></div>
+                {recoveryData?.quotes?.length ? <div className="table-wrap"><table><thead><tr><th>Quote</th><th>Customer</th><th>Status</th><th>Quote value</th><th>Due date</th></tr></thead><tbody>
+                  {recoveryData.quotes.map((item: RecordItem) => <tr key={item.id}><td><b>{String(item.name || item.title || item.client || 'Untitled quote')}</b><small>#{item.id.slice(0,8)}</small></td><td>{String(item.client || item.customerName || 'Not linked')}</td><td><span className="status-pill">{String(item.status || 'Open')}</span></td><td>{money(item.amount || 0)}</td><td>{dateLabel(String(item.dueDate || item.validUntil || ''))}</td></tr>)}
+                </tbody></table></div> : <div className="empty"><div className="empty-icon"><Check/></div><b>No open quotes recorded</b><span>Quotes with an open status will appear here so your team can follow up before opportunities go cold.</span></div>}
+              </div>
+            </>
+          )}
           {section === 'Calendar' && (
             <>
               <div className="page-heading">
@@ -1633,6 +1696,40 @@ export default function App() {
                 </div>
               </>
             )}
+            {section === 'Leads' && (
+              <>
+                <div className="form-row">
+                  <label>
+                    Phone number
+                    <input value={form.phone || ''} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="+27..." />
+                  </label>
+                  <label>
+                    Company
+                    <input value={form.company || ''} onChange={e => setForm({ ...form, company: e.target.value })} placeholder="Company name (optional)" />
+                  </label>
+                </div>
+                <label>
+                  Lead source
+                  <select value={form.source || 'Manual entry'} onChange={e => setForm({ ...form, source: e.target.value })}>
+                    <option>Manual entry</option><option>Website enquiry</option><option>Phone call</option><option>Email</option><option>Referral</option><option>Walk-in</option><option>Social media</option><option>Other</option>
+                  </select>
+                </label>
+                <div className="form-row">
+                  <label>
+                    Service requested
+                    <input value={form.serviceRequested || ''} onChange={e => setForm({ ...form, serviceRequested: e.target.value })} placeholder="What does the customer need?" />
+                  </label>
+                </div>
+                <label>
+                  Next follow-up date
+                  <input type="datetime-local" value={form.nextFollowUpAt || ''} onChange={e => setForm({ ...form, nextFollowUpAt: e.target.value })} />
+                </label>
+                <label className="public-consent">
+                  <input type="checkbox" checked={form.consentToContact === 'true'} onChange={e => setForm({ ...form, consentToContact: e.target.checked ? 'true' : 'false' })} />
+                  <span>This contact has agreed that the business may contact them about their enquiry.</span>
+                </label>
+              </>
+            )}
             {section === 'Customers' && (
               <>
                 <div className="form-row">
@@ -1683,7 +1780,7 @@ export default function App() {
             )}
             <div className="form-row">
               <label>
-                Amount (ZAR)
+                {section === 'Leads' ? 'Estimated job value (R)' : 'Amount (ZAR)' }
                 <input
                   type="number"
                   min="0"
