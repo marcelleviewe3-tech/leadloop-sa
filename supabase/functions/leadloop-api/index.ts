@@ -392,16 +392,25 @@ Deno.serve(async req => {
         const [leads, quotes] = await Promise.all([listRecords(workspaceId, "leads"), listRecords(workspaceId, "quotes")]);
         const terminalLeadStatuses = ["converted", "closed", "lost", "cancelled", "won"];
         const terminalQuoteStatuses = ["accepted", "won", "paid", "cancelled", "rejected", "expired"];
-        const now = new Date(), endOfToday = new Date(now);
-        endOfToday.setHours(23, 59, 59, 999);
+        const now = new Date();
+        const localDateKey = (value: unknown) => {
+          const parsed = new Date(String(value || ""));
+          if (!Number.isFinite(parsed.getTime())) return null;
+          const parts = new Intl.DateTimeFormat("en-CA", {
+            timeZone: "Africa/Johannesburg", year: "numeric", month: "2-digit", day: "2-digit"
+          }).formatToParts(parsed);
+          const part = (type: string) => parts.find(item => item.type === type)?.value || "";
+          return part("year") + "-" + part("month") + "-" + part("day");
+        };
+        const todayKey = localDateKey(now);
         const followUpDate = (lead: any) => lead.nextFollowUpAt || lead.followUpAt || lead.followUpDate || lead.dueDate || null;
         const followUps = leads.filter(lead => {
           if (terminalLeadStatuses.includes(clean(lead.status, 40).toLowerCase())) return false;
-          const due = followUpDate(lead), parsed = due ? new Date(String(due)) : null;
-          return !!parsed && Number.isFinite(parsed.getTime()) && parsed.getTime() <= endOfToday.getTime();
+          const dueKey = localDateKey(followUpDate(lead));
+          return !!dueKey && !!todayKey && dueKey <= todayKey;
         }).map(lead => {
-          const due = followUpDate(lead), parsed = new Date(String(due));
-          return { ...lead, followUpAt: due, isOverdue: parsed.getTime() < new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() };
+          const due = followUpDate(lead), dueKey = localDateKey(due);
+          return { ...lead, followUpAt: due, isOverdue: !!dueKey && !!todayKey && dueKey < todayKey };
         }).sort((a, b) => new Date(String(a.followUpAt)).getTime() - new Date(String(b.followUpAt)).getTime());
         const openQuotes = quotes.filter(quote => !terminalQuoteStatuses.includes(clean(quote.status, 40).toLowerCase()));
         const recovered = leads.filter(lead => clean(lead.recoveryStatus, 40).toLowerCase() === "recovered" && Number(lead.recoveredAmount) > 0);
