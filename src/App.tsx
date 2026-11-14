@@ -396,6 +396,7 @@ export default function App() {
       const payload = {
         ...form,
         amount: form.amount ? Number(form.amount) : undefined,
+        nextFollowUpAt: form.nextFollowUpAt ? new Date(form.nextFollowUpAt).toISOString() : undefined,
         consentToContact: form.consentToContact === 'true',
       };
       const endpoint = '/api/workspaces/' + workspace.id + '/' + resource;
