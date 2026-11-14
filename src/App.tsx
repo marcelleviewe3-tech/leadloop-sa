@@ -1836,6 +1836,20 @@ export default function App() {
                     <option>Manual entry</option><option>Website enquiry</option><option>Phone call</option><option>Email</option><option>Referral</option><option>Walk-in</option><option>Social media</option><option>Other</option>
                   </select>
                 </label>
+                <div className="form-row">
+                  <label>
+                    Service requested
+                    <input value={form.serviceRequested || ''} onChange={e => setForm({ ...form, serviceRequested: e.target.value })} placeholder="What does the customer need?" />
+                  </label>
+                  <label>
+                    Estimated job value (R)
+                    <input type="number" min="0" step="0.01" value={form.amount || ''} onChange={e => setForm({ ...form, amount: e.target.value })} placeholder="Optional estimate" />
+                  </label>
+                </div>
+                <label>
+                  Next follow-up date
+                  <input type="datetime-local" value={form.nextFollowUpAt || ''} onChange={e => setForm({ ...form, nextFollowUpAt: e.target.value })} />
+                </label>
                 <label className="public-consent">
                   <input type="checkbox" checked={form.consentToContact === 'true'} onChange={e => setForm({ ...form, consentToContact: e.target.checked ? 'true' : 'false' })} />
                   <span>This contact has agreed that the business may contact them about their enquiry.</span>
