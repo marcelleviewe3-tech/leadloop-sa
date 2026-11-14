@@ -20,7 +20,7 @@ For initial testing, use an email address that belongs to the Supabase organizat
 - The unified AI assistant requires `AI_PROVIDER_API_KEY` as a Supabase Edge Function secret. It is not configured yet, so AI requests will return a clear configuration error until a key is added.
 - WhatsApp is status-only. Meta onboarding, webhooks and message delivery are not implemented.
 - Email drafts open in the user's email app for manual review and sending; LeadLoop does not send them automatically.
-- Billing/subscriptions and automated missed-call recovery are not active.
+- Billing/subscriptions are not active. Missed-call capture requires a customer's configured phone provider webhook; LeadLoop does not detect calls by itself.
 
 
 This branch is an isolated migration copy. The original `main` branch and the live AppDeploy deployment are intentionally untouched.
@@ -65,3 +65,11 @@ This branch is an isolated migration copy. The original `main` branch and the li
 ## Local development
 
 Copy `.env.example` to `.env.local` and set only the two public Supabase browser values. Then run `npm install`, `npm run typecheck`, and `npm run build`.
+
+
+## Revenue recovery release
+- Added a Revenue Recovery workspace section with a due follow-up queue, open quote pipeline, recorded recovered revenue and lead conversion rate.
+- Follow-up drafts require a saved email address and recorded contact consent; drafts are saved for owner/admin review and are never sent automatically.
+- A recovered sale is counted only after an owner/admin/manager enters and confirms the actual sale amount. LeadLoop then records the recovered amount, marks the lead converted and creates or updates its linked customer record.
+- Quotes and follow-ups are reported from explicitly recorded statuses and dates. Missing follow-up dates are not silently treated as overdue.
+- API routes: GET /api/workspaces/:id/revenue-recovery and POST /api/workspaces/:id/revenue-recovery/mark-recovered.

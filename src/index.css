@@ -1434,3 +1434,18 @@ td small {
 .leadloop-agent-compose textarea{flex:1;min-width:0;resize:vertical;min-height:48px;padding:12px;border:1px solid #304158;border-radius:12px;background:#0c1420;color:#eef3fa}
 .leadloop-agent-compose button{white-space:nowrap;min-height:46px}
 @media(max-width:600px){.leadloop-agent-panel{padding:15px;margin-top:16px}.leadloop-agent-compose{flex-direction:column;align-items:stretch}.leadloop-agent-compose button{width:100%;justify-content:center}.agent-bubble{max-width:96%}}
+
+
+/* Revenue recovery workspace */
+.recovery-metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:13px; margin-bottom:15px; }
+.recovery-explainer { display:flex; align-items:flex-start; gap:14px; margin-bottom:15px; background:linear-gradient(120deg,#182b25,#111b25); border-color:#3a5745; }
+.recovery-explainer-icon { width:42px; height:42px; flex:0 0 42px; display:grid; place-items:center; border-radius:12px; background:#c8f76d; color:#17251c; }
+.recovery-explainer b { color:#e5f1dd; font:700 13px Manrope; }
+.recovery-explainer p { color:#9aada1; font-size:11px; line-height:1.65; margin:6px 0 0; }
+.recovery-table { margin-top:15px; }
+.recovery-actions { display:flex; flex-wrap:wrap; gap:7px; align-items:center; }
+.recovery-actions button { padding:8px 10px; font-size:10px; }
+.recovery-actions button:disabled { opacity:.4; cursor:not-allowed; }
+.recovery-overdue { display:inline-block; border:1px solid #8c4d43; background:#3b2424; color:#ffb7a9; padding:5px 9px; border-radius:20px; font-size:10px; }
+@media (max-width:900px) { .recovery-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media (max-width:520px) { .recovery-metrics { grid-template-columns:1fr 1fr; gap:8px; } .recovery-metrics .metric-card { padding:13px; } .recovery-metrics .metric-card strong { font-size:21px; } .recovery-actions { min-width:160px; } }

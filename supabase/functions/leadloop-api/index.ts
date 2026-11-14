@@ -388,6 +388,56 @@ Deno.serve(async req => {
         const sum = (rows: any[]) => rows.reduce((v, r) => v + Number(r.amount || 0), 0);
         return json({ metrics: { leads: leads.length, customers: customers.length, projects: projects.filter(r => !["Done", "Cancelled"].includes(r.status)).length, tasks: tasks.filter(r => !["Done", "Cancelled"].includes(r.status)).length, revenue: sum(invoices.filter(r => r.status === "Paid")), outstanding: sum(invoices.filter(r => !["Paid", "Cancelled"].includes(r.status))) } });
       }
+      if (tail === "revenue-recovery" && method === "GET") {
+        const [leads, quotes] = await Promise.all([listRecords(workspaceId, "leads"), listRecords(workspaceId, "quotes")]);
+        const terminalLeadStatuses = ["converted", "closed", "lost", "cancelled", "won"];
+        const terminalQuoteStatuses = ["accepted", "won", "paid", "cancelled", "rejected", "expired"];
+        const now = new Date(), endOfToday = new Date(now);
+        endOfToday.setHours(23, 59, 59, 999);
+        const followUpDate = (lead: any) => lead.nextFollowUpAt || lead.followUpAt || lead.followUpDate || lead.dueDate || null;
+        const followUps = leads.filter(lead => {
+          if (terminalLeadStatuses.includes(clean(lead.status, 40).toLowerCase())) return false;
+          const due = followUpDate(lead), parsed = due ? new Date(String(due)) : null;
+          return !!parsed && Number.isFinite(parsed.getTime()) && parsed.getTime() <= endOfToday.getTime();
+        }).map(lead => {
+          const due = followUpDate(lead), parsed = new Date(String(due));
+          return { ...lead, followUpAt: due, isOverdue: parsed.getTime() < new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() };
+        }).sort((a, b) => new Date(String(a.followUpAt)).getTime() - new Date(String(b.followUpAt)).getTime());
+        const openQuotes = quotes.filter(quote => !terminalQuoteStatuses.includes(clean(quote.status, 40).toLowerCase()));
+        const recovered = leads.filter(lead => clean(lead.recoveryStatus, 40).toLowerCase() === "recovered" && Number(lead.recoveredAmount) > 0);
+        const converted = leads.filter(lead => clean(lead.status, 40).toLowerCase() === "converted");
+        const total = (items: any[], field: string) => items.reduce((sum, item) => sum + (Number.isFinite(Number(item[field])) ? Number(item[field]) : 0), 0);
+        return json({ metrics: {
+          recoveredRevenue: total(recovered, "recoveredAmount"), recoveredDeals: recovered.length,
+          followUpsDue: followUps.length, overdueFollowUps: followUps.filter(item => item.isOverdue).length,
+          openQuotes: openQuotes.length, quotePipelineValue: total(openQuotes, "amount"),
+          leadConversionRate: leads.length ? converted.length / leads.length * 100 : 0
+        }, followUps, quotes: openQuotes.sort((a, b) => new Date(String(a.dueDate || a.validUntil || "9999-12-31")).getTime() - new Date(String(b.dueDate || b.validUntil || "9999-12-31")).getTime()).slice(0, 100) });
+      }
+      if (tail === "revenue-recovery/mark-recovered" && method === "POST") {
+        if (!["owner", "admin", "manager"].includes(access.role)) throw new HttpError("Only owners, admins or managers can record recovered sales.", 403);
+        const b = obj(await bodyOf(req)), leadId = clean(b.leadId, 100), amount = Number(b.amount);
+        if (!leadId || !Number.isFinite(amount) || amount <= 0) throw new HttpError("A lead ID and confirmed sale amount greater than zero are required.", 400);
+        const { data: leadRow, error: leadError } = await admin.from("workspace_records").select("data").eq("workspace_id", workspaceId).eq("resource", "leads").eq("id", leadId).maybeSingle();
+        if (leadError) throw leadError;
+        if (!leadRow) throw new HttpError("Lead not found in this workspace.", 404);
+        const lead = obj(leadRow.data), leadName = clean(lead.name || lead.client || lead.title, 180);
+        if (!leadName) throw new HttpError("Add a lead name before recording the recovered sale.", 400);
+        if (clean(lead.recoveryStatus, 40).toLowerCase() === "recovered") throw new HttpError("This lead already has a recovered sale recorded.", 409);
+        const customers = await listRecords(workspaceId, "customers");
+        let customer = customers.find(item => item.sourceLeadId === leadId || item.id === lead.convertedToCustomerId);
+        let customerCreated = false;
+        if (!customer) {
+          customer = await addRecord(workspaceId, "customers", { name: leadName, email: clean(lead.email, 180), phone: clean(lead.phone, 50), company: clean(lead.company, 180), source: clean(lead.source, 100), sourceLeadId: leadId, amount, status: "Active" }, user.id);
+          customerCreated = true;
+        } else {
+          await updateRecord(workspaceId, "customers", customer.id, { amount, status: "Active" });
+        }
+        const recoveredAt = new Date().toISOString();
+        await updateRecord(workspaceId, "leads", leadId, { status: "Converted", recoveredAmount: amount, recoveryStatus: "Recovered", recoveredAt, recoveredBy: user.id, convertedAt: lead.convertedAt || recoveredAt, convertedToCustomerId: customer.id });
+        await audit(workspaceId, user.id, "user", "revenue_recovered", "leads", leadId, "Recorded a confirmed recovered sale of " + amount.toFixed(2) + " ZAR.");
+        return json({ recovered: true, amount, customerId: customer.id, customerCreated });
+      }
       if (tail === "members" && method === "GET") {
         const { data, error } = await admin.from("workspace_members").select("user_id,email,role,created_at").eq("workspace_id", workspaceId);
         if (error) throw error;
