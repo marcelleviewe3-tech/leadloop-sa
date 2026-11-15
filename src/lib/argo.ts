@@ -35,6 +35,12 @@ export const argo = {
   async predictions(workspaceId: string) {
     return invoke<{ predictions: ArgoPrediction[]; sampleSize: number; closedOutcomes: number; calibrated: boolean; disclaimer: string }>('argo-api/predictions', { workspaceId });
   },
+  async communicationsStatus(workspaceId: string) {
+    return invoke<{ whatsapp: { connected: boolean; status: string }; sms: { configured: boolean }; voice: { configured: boolean }; callWebhook: { configured: boolean; provider: string | null } }>('argo-api/communications/status', { workspaceId });
+  },
+  async proposeAction(workspaceId: string, actionType: string, payload: Record<string, unknown>, rationale: string) {
+    return invoke<{ created: boolean; item: ArgoAction }>('argo-api/actions', { workspaceId, actionType, payload, rationale });
+  },
   async approveAction(workspaceId: string, actionId: string) {
     return invoke<{ approved: boolean }>(`argo-api/actions/${actionId}/approve`, { workspaceId });
   },

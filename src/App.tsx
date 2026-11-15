@@ -172,6 +172,7 @@ export default function App() {
   const [argoActions, setArgoActions] = useState<import('./lib/argo').ArgoAction[]>([]);
   const [argoPredictions, setArgoPredictions] = useState<import('./lib/argo').ArgoPrediction[]>([]);
   const [argoOpsLoading, setArgoOpsLoading] = useState(false);
+  const [argoChannels, setArgoChannels] = useState<{ whatsapp: { connected: boolean; status: string }; sms: { configured: boolean }; voice: { configured: boolean } } | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
   const [workspaceName, setWorkspaceName] = useState('');
   const [industry, setIndustry] = useState('Professional services');
@@ -562,11 +563,12 @@ export default function App() {
     if (!workspace) return;
     setArgoOpsLoading(true);
     try {
-      const [actions, predictions] = await Promise.all([
-        argo.listActions(workspace.id), argo.predictions(workspace.id),
+      const [actions, predictions, channels] = await Promise.all([
+        argo.listActions(workspace.id), argo.predictions(workspace.id), argo.communicationsStatus(workspace.id),
       ]);
       setArgoActions(actions.items || []);
       setArgoPredictions(predictions.predictions || []);
+      setArgoChannels(channels);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'ARGO operations could not be refreshed.');
     } finally {
@@ -2101,6 +2103,14 @@ export default function App() {
                     {item.status === 'failed' && <p className="muted">Execution failed. Review the action details before proposing it again.</p>}
                   </div>
                 ))}
+              <div className="argo-ops-heading">
+                <div><span className="eyebrow">CONNECTED CHANNELS</span><h3>Communications</h3></div>
+              </div>
+              <div className="argo-channel-grid">
+                <div><span>WhatsApp</span><b>{argoChannels?.whatsapp.connected ? 'Connected' : 'Not connected'}</b></div>
+                <div><span>SMS</span><b>{argoChannels?.sms.configured ? 'Configured' : 'Needs Twilio setup'}</b></div>
+                <div><span>Voice</span><b>{argoChannels?.voice.configured ? 'Configured' : 'Needs Twilio setup'}</b></div>
+              </div>
               <div className="argo-ops-heading">
                 <div><span className="eyebrow">BUYER INTELLIGENCE</span><h3>Lead predictions</h3></div>
                 <span className="muted">{argoPredictions.length} scored</span>
