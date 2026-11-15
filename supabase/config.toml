@@ -2,3 +2,6 @@
 # JWT is verified inside the function so public enquiry links can be used without login.
 [functions.leadloop-api]
 verify_jwt = false
+
+[functions.argo-api]
+verify_jwt = true
