@@ -169,6 +169,9 @@ export default function App() {
   const [argoMessages, setArgoMessages] = useState<Array<{ role: 'user' | 'assistant'; text: string }>>([]);
   const [argoConversationId, setArgoConversationId] = useState<string | null>(null);
   const [argoMode, setArgoMode] = useState<'ai' | 'rules' | null>(null);
+  const [argoActions, setArgoActions] = useState<import('./lib/argo').ArgoAction[]>([]);
+  const [argoPredictions, setArgoPredictions] = useState<import('./lib/argo').ArgoPrediction[]>([]);
+  const [argoOpsLoading, setArgoOpsLoading] = useState(false);
   const [form, setForm] = useState<Record<string, string>>({});
   const [workspaceName, setWorkspaceName] = useState('');
   const [industry, setIndustry] = useState('Professional services');
@@ -555,6 +558,40 @@ export default function App() {
     }
   }
 
+  async function refreshArgoOperations() {
+    if (!workspace) return;
+    setArgoOpsLoading(true);
+    try {
+      const [actions, predictions] = await Promise.all([
+        argo.listActions(workspace.id), argo.predictions(workspace.id),
+      ]);
+      setArgoActions(actions.items || []);
+      setArgoPredictions(predictions.predictions || []);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'ARGO operations could not be refreshed.');
+    } finally {
+      setArgoOpsLoading(false);
+    }
+  }
+
+  async function approveArgoAction(actionId: string) {
+    if (!workspace) return;
+    try { await argo.approveAction(workspace.id, actionId); await refreshArgoOperations(); }
+    catch (error) { setNotice(error instanceof Error ? error.message : 'Could not approve action.'); }
+  }
+
+  async function executeArgoAction(actionId: string) {
+    if (!workspace) return;
+    try { await argo.executeAction(workspace.id, actionId); await refreshArgoOperations(); }
+    catch (error) { setNotice(error instanceof Error ? error.message : 'Could not execute action.'); await refreshArgoOperations(); }
+  }
+
+  async function rejectArgoAction(actionId: string) {
+    if (!workspace) return;
+    try { await argo.rejectAction(workspace.id, actionId); await refreshArgoOperations(); }
+    catch (error) { setNotice(error instanceof Error ? error.message : 'Could not reject action.'); }
+  }
+
   async function sendArgoMessage(question: string, clearInput: (value: string) => void) {
     if (!workspace || !question.trim() || argoBusy) return;
     const message = question.trim();
@@ -566,6 +603,7 @@ export default function App() {
       setArgoConversationId(result.conversationId);
       setArgoMode(result.mode);
       setArgoMessages(old => [...old, { role: 'assistant', text: result.answer }]);
+      await refreshArgoOperations();
     } catch (error) {
       setArgoMessages(old => [...old, {
         role: 'assistant',
@@ -583,6 +621,10 @@ export default function App() {
   async function askAI() {
     await sendArgoMessage(aiQuestion, setAiQuestion);
   }
+
+  useEffect(() => {
+    if (showAI && workspace) void refreshArgoOperations();
+  }, [showAI, workspace?.id]);
 
   async function signOut() {
     await auth.signOut();
@@ -2039,6 +2081,39 @@ export default function App() {
               {argoMessages.map((item, index) => (
                 <div className={item.role === 'user' ? 'assistant-message user' : 'assistant-message answer'} key={index}>{item.text}</div>
               ))}
+            </div>
+            <div className="argo-ops-panel">
+              <div className="argo-ops-heading">
+                <div><span className="eyebrow">ACTION CONTROL</span><h3>Approval queue</h3></div>
+                <button className="secondary small" onClick={() => void refreshArgoOperations()} disabled={argoOpsLoading}>{argoOpsLoading ? 'Refreshing…' : 'Refresh'}</button>
+              </div>
+              {argoActions.filter(item => ['pending_approval','approved','failed'].includes(item.status)).length === 0
+                ? <p className="muted">No pending actions. ARGO will show proposed work here before execution.</p>
+                : argoActions.filter(item => ['pending_approval','approved','failed'].includes(item.status)).map(item => (
+                  <div className="argo-action-card" key={item.id}>
+                    <div><b>{item.action_type.replaceAll('_',' ')}</b><span className="status-pill">{item.status.replaceAll('_',' ')}</span></div>
+                    <p>{item.rationale || String(item.payload.title || item.payload.status || 'Action proposed by ARGO')}</p>
+                    {item.status === 'pending_approval' && <div className="argo-action-buttons">
+                      <button className="primary small" onClick={() => void approveArgoAction(item.id)}>Approve</button>
+                      <button className="secondary small" onClick={() => void rejectArgoAction(item.id)}>Reject</button>
+                    </div>}
+                    {item.status === 'approved' && <button className="primary small" onClick={() => void executeArgoAction(item.id)}>Execute approved action</button>}
+                    {item.status === 'failed' && <p className="muted">Execution failed. Review the action details before proposing it again.</p>}
+                  </div>
+                ))}
+              <div className="argo-ops-heading">
+                <div><span className="eyebrow">BUYER INTELLIGENCE</span><h3>Lead predictions</h3></div>
+                <span className="muted">{argoPredictions.length} scored</span>
+              </div>
+              {argoPredictions.length === 0
+                ? <p className="muted">Predictions appear when the workspace has lead records.</p>
+                : argoPredictions.slice(0, 5).map(item => (
+                  <div className="argo-prediction-row" key={item.leadId}>
+                    <div><b>{item.name}</b><span>{item.band} potential</span></div>
+                    <strong>{item.score}%</strong>
+                    <small>{item.nextBestAction}</small>
+                  </div>
+                ))}
             </div>
             <div className="ai-compose">
               <textarea
