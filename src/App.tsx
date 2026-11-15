@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { auth, api, invitesClient } from './lib/platform';
-import { LeadLoopAgent } from './lib/leadloop-agent';
+import { argo } from './lib/argo';
 import {
   Activity,
   ArrowUpRight,
@@ -164,12 +164,11 @@ export default function App() {
   const [mobileNav, setMobileNav] = useState(false);
   const [search, setSearch] = useState('');
   const [aiQuestion, setAiQuestion] = useState('');
-  const [aiAnswer, setAiAnswer] = useState('');
-  const [aiBusy, setAiBusy] = useState(false);
   const [agentQuestion, setAgentQuestion] = useState('');
-  const [agentBusy, setAgentBusy] = useState(false);
-  const [agentMessages, setAgentMessages] = useState<Array<{ role: 'user' | 'agent'; text: string }>>([]);
-  const agent = useMemo(() => new LeadLoopAgent({ businessName: workspace?.name || 'LeadLoop SA' }), [workspace?.name]);
+  const [argoBusy, setArgoBusy] = useState(false);
+  const [argoMessages, setArgoMessages] = useState<Array<{ role: 'user' | 'assistant'; text: string }>>([]);
+  const [argoConversationId, setArgoConversationId] = useState<string | null>(null);
+  const [argoMode, setArgoMode] = useState<'ai' | 'rules' | null>(null);
   const [form, setForm] = useState<Record<string, string>>({});
   const [workspaceName, setWorkspaceName] = useState('');
   const [industry, setIndustry] = useState('Professional services');
@@ -264,6 +263,12 @@ export default function App() {
     if (!workspace) return;
     refreshSection();
   }, [workspace?.id, section]);
+
+  useEffect(() => {
+    setArgoConversationId(null);
+    setArgoMessages([]);
+    setArgoMode(null);
+  }, [workspace?.id]);
 
   async function refreshSection() {
     if (!workspace) return;
@@ -550,49 +555,33 @@ export default function App() {
     }
   }
 
-  async function askLeadLoopAgent() {
-    if (!workspace || !agentQuestion.trim() || agentBusy) return;
-    const question = agentQuestion.trim();
-    setAgentQuestion('');
-    setAgentMessages(old => [...old, { role: 'user', text: question }]);
-    setAgentBusy(true);
+  async function sendArgoMessage(question: string, clearInput: (value: string) => void) {
+    if (!workspace || !question.trim() || argoBusy) return;
+    const message = question.trim();
+    clearInput('');
+    setArgoMessages(old => [...old, { role: 'user', text: message }]);
+    setArgoBusy(true);
     try {
-      const names = ['leads', 'customers', 'invoices', 'tasks', 'appointments', 'expenses'];
-      const pairs = await Promise.all(names.map(async name => {
-        const response = await api.get('/api/workspaces/' + workspace.id + '/' + name);
-        return [name, response.data.items || []] as const;
-      }));
-      const context = Object.fromEntries(pairs);
-      const result = await agent.chat(question, context);
-      let reply = result.reply;
-      if (result.needsApproval && result.data) {
-        const saved = await api.post('/api/workspaces/' + workspace.id + '/messages/drafts', result.data);
-        reply += '\\n\\n' + (saved.data.message || 'Draft saved in Messages for owner/admin approval. It has NOT been sent.');
-      }
-      setAgentMessages(old => [...old, { role: 'agent', text: reply }]);
+      const result = await argo.chat(workspace.id, message, argoConversationId || undefined);
+      setArgoConversationId(result.conversationId);
+      setArgoMode(result.mode);
+      setArgoMessages(old => [...old, { role: 'assistant', text: result.answer }]);
     } catch (error) {
-      setAgentMessages(old => [...old, { role: 'agent', text: error instanceof Error ? error.message : 'The LeadLoop agent could not complete that request.' }]);
-    } finally { setAgentBusy(false); }
+      setArgoMessages(old => [...old, {
+        role: 'assistant',
+        text: error instanceof Error ? error.message : 'ARGO could not complete that request. Please retry.',
+      }]);
+    } finally {
+      setArgoBusy(false);
+    }
+  }
+
+  async function askArgoFromPanel() {
+    await sendArgoMessage(agentQuestion, setAgentQuestion);
   }
 
   async function askAI() {
-    if (!workspace || !aiQuestion.trim()) return;
-    setAiBusy(true);
-    setAiAnswer('');
-    try {
-      const result = await api.get(
-        '/api/workspaces/' + workspace.id + '/assistant?question=' + encodeURIComponent(aiQuestion.trim()) + '&section=' + encodeURIComponent(section)
-      );
-      setAiAnswer(result.data.answer || 'No answer was returned.');
-    } catch (error) {
-      setAiAnswer(
-        (error instanceof Error
-          ? error.message
-          : 'The assistant is unavailable.') + ' You can retry in a moment.'
-      );
-    } finally {
-      setAiBusy(false);
-    }
+    await sendArgoMessage(aiQuestion, setAiQuestion);
   }
 
   async function signOut() {
@@ -1113,7 +1102,7 @@ export default function App() {
             <button
               className="icon-btn"
               onClick={() => setShowAI(true)}
-              title="Ask LeadLoop AI"
+              title="Ask ARGO"
             >
               <Sparkles />
             </button>
@@ -1143,7 +1132,7 @@ export default function App() {
                   <p>Here's what's moving across {workspace.name}.</p>
                 </div>
                 <button className="primary" onClick={() => setShowAI(true)}>
-                  <Sparkles size={16} /> Ask LeadLoop AI
+                  <Sparkles size={16} /> Ask ARGO
                 </button>
               </div>
               <div className="metric-grid">
@@ -1204,23 +1193,23 @@ export default function App() {
                     what deserves your attention next.
                   </p>
                   <button className="secondary" onClick={() => setShowAI(true)}>
-                    Open AI assistant <ArrowUpRight size={15} />
+                    Open ARGO <ArrowUpRight size={15} />
                   </button>
                 </div>
               </div>
               <section className="leadloop-agent-panel">
                 <div className="leadloop-agent-heading">
                   <div className="ai-orb small"><Sparkles /></div>
-                  <div><span className="eyebrow">RULE-BASED BUSINESS AGENT</span><h3>LeadLoop agent chat</h3><p>Uses your actual workspace records. Customer messages are never sent automatically.</p></div>
+                  <div><span className="eyebrow">ARGO · CENTRAL INTELLIGENCE</span><h3>ARGO</h3><p>Uses your actual workspace records. Customer messages are never sent automatically.</p></div>
                 </div>
                 <div className="leadloop-agent-messages" aria-live="polite">
-                  {agentMessages.length === 0 && <div className="agent-bubble agent-reply">Hi. I can score leads, check follow-ups, review finances and appointments, find duplicates, and prepare consent-checked email drafts for approval.</div>}
-                  {agentMessages.map((item, index) => <div className={item.role === 'user' ? 'agent-bubble agent-user' : 'agent-bubble agent-reply'} key={index}>{item.text}</div>)}
-                  {agentBusy && <div className="agent-bubble agent-reply">Checking your workspace records…</div>}
+                  {argoMessages.length === 0 && <div className="agent-bubble agent-reply">I'm ARGO, LeadLoop's central intelligence. I use this workspace's business records and our shared conversation to help you understand what is happening and decide what deserves attention.</div>}
+                  {argoMessages.map((item, index) => <div className={item.role === 'user' ? 'agent-bubble agent-user' : 'agent-bubble agent-reply'} key={index}>{item.text}</div>)}
+                  {argoBusy && <div className="agent-bubble agent-reply">Checking your workspace records…</div>}
                 </div>
-                <form className="leadloop-agent-compose" onSubmit={event => { event.preventDefault(); askLeadLoopAgent(); }}>
-                  <textarea rows={2} value={agentQuestion} onChange={event => setAgentQuestion(event.target.value)} placeholder="Ask your LeadLoop agent…" />
-                  <button className="primary" type="submit" disabled={agentBusy || !agentQuestion.trim()}>{agentBusy ? 'Working…' : 'Send'} <Send size={15} /></button>
+                <form className="leadloop-agent-compose" onSubmit={event => { event.preventDefault(); askArgoFromPanel(); }}>
+                  <textarea rows={2} value={agentQuestion} onChange={event => setAgentQuestion(event.target.value)} placeholder="Ask ARGO about this business…" />
+                  <button className="primary" type="submit" disabled={argoBusy || !agentQuestion.trim()}>{argoBusy ? 'Working…' : 'Send'} <Send size={15} /></button>
                 </form>
               </section>
             </>
@@ -2030,8 +2019,8 @@ export default function App() {
                 <Sparkles />
               </div>
               <div>
-                <span className="eyebrow">LEADLOOP INTELLIGENCE</span>
-                <h2>Your business assistant</h2>
+                <span className="eyebrow">{argoMode === 'rules' ? 'RULE-BASED MODE' : argoMode === 'ai' ? 'AI REASONING MODE' : 'CENTRAL INTELLIGENCE'}</span>
+                <h2>ARGO</h2>
               </div>
               <button className="icon-btn" onClick={() => setShowAI(false)}>
                 <X />
@@ -2045,13 +2034,11 @@ export default function App() {
             </div>
             <div className="ai-chat">
               <div className="assistant-message">
-                I can help you understand your business, organize priorities,
-                draft customer messages and decide what to do next. I use the
-                information available in this workspace.
+                I'm ARGO, the intelligence behind LeadLoop. I can analyse the records in this workspace, remember our conversation and help you decide what to do next.
               </div>
-              {aiAnswer && (
-                <div className="assistant-message answer">{aiAnswer}</div>
-              )}
+              {argoMessages.map((item, index) => (
+                <div className={item.role === 'user' ? 'assistant-message user' : 'assistant-message answer'} key={index}>{item.text}</div>
+              ))}
             </div>
             <div className="ai-compose">
               <textarea
@@ -2063,13 +2050,13 @@ export default function App() {
               <button
                 className="primary"
                 onClick={askAI}
-                disabled={aiBusy || !aiQuestion.trim()}
+                disabled={argoBusy || !aiQuestion.trim()}
               >
-                {aiBusy ? 'Thinking…' : 'Ask AI'} <Send size={16} />
+                {argoBusy ? 'Thinking…' : 'Ask ARGO'} <Send size={16} />
               </button>
             </div>
             <small className="ai-disclaimer">
-              AI can create and update workspace records when you request an authorized action. External messages, calls and payments are not sent or performed unless a connected service explicitly supports them.
+              This ARGO release is read-only: it analyses workspace data and keeps conversation history. It does not change records, send messages, make calls or move money.
             </small>
           </aside>
         </div>
