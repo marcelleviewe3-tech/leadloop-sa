@@ -2091,7 +2091,7 @@ export default function App() {
                 ? <p className="muted">No pending actions. ARGO will show proposed work here before execution.</p>
                 : argoActions.filter(item => ['pending_approval','approved','failed'].includes(item.status)).map(item => (
                   <div className="argo-action-card" key={item.id}>
-                    <div><b>{item.action_type.replaceAll('_',' ')}</b><span className="status-pill">{item.status.replaceAll('_',' ')}</span></div>
+                    <div><b>{item.action_type .replace(/_/g, ' ')}</b><span className="status-pill">{item.status .replace(/_/g, ' ')}</span></div>
                     <p>{item.rationale || String(item.payload.title || item.payload.status || 'Action proposed by ARGO')}</p>
                     {item.status === 'pending_approval' && <div className="argo-action-buttons">
                       <button className="primary small" onClick={() => void approveArgoAction(item.id)}>Approve</button>
